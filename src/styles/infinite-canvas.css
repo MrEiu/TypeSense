@@ -1,0 +1,411 @@
+/**
+ * infinite-canvas.css
+ *
+ * 自组织无限幕布视觉与视口漫游样式
+ * 职责：定义点阵网格画布、自组织拓扑节点卡片、SVG 贝塞尔流向连线与悬浮漫游工具栏。
+ */
+
+/* 管理端顶层容器 */
+.admin-app-root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.admin-canvas-header {
+  height: 52px;
+  background: rgba(14, 20, 34, 0.95);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.admin-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-badge {
+  font-family: var(--font-family-mono);
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(99, 102, 241, 0.2);
+  color: var(--color-primary-400);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+}
+
+.brand-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-canvas-stage {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 无限幕布外部视口容器 */
+.infinite-canvas-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #060911;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+  background-size: 28px 28px;
+  cursor: grab;
+  user-select: none;
+}
+
+.infinite-canvas-viewport:active {
+  cursor: grabbing;
+}
+
+/* 内部无限漫游平面 */
+.infinite-canvas-plane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+.canvas-content-layer {
+  position: absolute;
+}
+
+/* ============================================================ */
+/* SVG 贝塞尔流向连线层                                          */
+/* ============================================================ */
+.canvas-connections-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 1;
+}
+
+.edge-path-glow {
+  fill: none;
+  stroke: rgba(99, 102, 241, 0.25);
+  stroke-width: 8;
+  filter: blur(4px);
+}
+
+.edge-path-main {
+  fill: none;
+  stroke: url(#edgeGradient);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 3;
+  animation: flowDash 30s linear infinite;
+}
+
+@keyframes flowDash {
+  to {
+    stroke-dashoffset: -1000;
+  }
+}
+
+.edge-label-text {
+  fill: var(--color-primary-400);
+  font-family: var(--font-family-mono);
+  font-size: 0.725rem;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: #060911;
+  stroke-width: 4px;
+}
+
+/* ============================================================ */
+/* 幕布节点卡片                                                  */
+/* ============================================================ */
+.canvas-node-card {
+  position: absolute;
+  background: rgba(14, 20, 34, 0.88);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 40px -8px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  padding: 24px;
+  cursor: default;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+.canvas-node-card:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 22px 50px -8px rgba(0, 0, 0, 0.75), 0 0 25px -4px rgba(99, 102, 241, 0.35);
+  z-index: 10;
+}
+
+/* 连接锚点 */
+.canvas-node-port {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #a855f7;
+  border: 2px solid #060911;
+  box-shadow: 0 0 8px #a855f7;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.port-input {
+  left: -6px;
+}
+
+.port-output {
+  right: -6px;
+}
+
+/* 节点头部 */
+.canvas-node-header {
+  margin-bottom: 18px;
+}
+
+.canvas-node-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-family-mono);
+  font-size: 0.725rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(99, 102, 241, 0.16);
+  color: var(--color-primary-400);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  margin-bottom: 8px;
+}
+
+.canvas-node-badge.badge-start {
+  background: rgba(20, 184, 166, 0.16);
+  color: var(--color-accent-teal);
+  border-color: rgba(20, 184, 166, 0.3);
+}
+
+.canvas-node-badge.badge-end {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--color-accent-amber);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.canvas-node-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.canvas-node-subtitle {
+  font-size: 0.825rem;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* 节点主体与元数据块 */
+.canvas-node-body {
+  margin-top: 14px;
+}
+
+.canvas-node-meta-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  font-size: 0.825rem;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.canvas-node-meta-box.end-box {
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+
+/* ============================================================ */
+/* 悬浮漫游控制栏 (Floating Toolbar)                             */
+/* ============================================================ */
+.canvas-floating-toolbar {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(14, 20, 34, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-full);
+  padding: 6px 14px;
+  box-shadow: var(--shadow-lg);
+}
+
+.canvas-tool-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.canvas-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--color-border-medium);
+}
+
+.canvas-zoom-pill {
+  font-family: var(--font-family-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-primary-400);
+  min-width: 48px;
+  text-align: center;
+}
+
+/* 顶层视图模式切换器 (Mode Switcher) */
+.view-mode-switcher-bar {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  background: rgba(14, 20, 34, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-full);
+  padding: 4px;
+  box-shadow: var(--shadow-md);
+}
+
+.view-mode-tab {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  padding: 8px 18px;
+  border-radius: var(--radius-full);
+  font-size: 0.825rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+}
+
+.view-mode-tab:hover {
+  color: var(--color-text-primary);
+}
+
+.view-mode-tab.is-active {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.4);
+}
+
+/* 居中加载提示 */
+.canvas-loading-indicator {
+  position: absolute;
+  top: 45vh;
+  left: 45vw;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--color-text-secondary);
+  font-size: 0.95rem;
+  background: rgba(14, 20, 34, 0.9);
+  padding: 16px 24px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.canvas-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(99, 102, 241, 0.2);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ============================================================ */
+/* 题目组件幕布卡片静态预览微型样式 (Canvas Node Previews)       */
+/* ============================================================ */
+.canvas-preview-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.canvas-preview-option-row {
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-preview-likert-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.canvas-preview-scale-chip {
+  display: inline-block;
+  padding: 4px 8px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 6px;
+  font-size: 0.775rem;
+  color: #a5b4fc;
+}
+
+.canvas-preview-text-box {
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  font-style: italic;
+}
+

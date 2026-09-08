@@ -1,0 +1,128 @@
+/**
+ * src/styles/theme.css
+ *
+ * Zen Paper 现代问卷设计系统样式变量
+ * 核心：通透温润、高阅读性、排版优先、去极客化
+ */
+
+:root {
+  /* 色彩体系 */
+  --zen-bg: #f8fafc;
+  --zen-surface: #ffffff;
+  --zen-surface-hover: #f1f5f9;
+  --zen-border: rgba(15, 23, 42, 0.08);
+  --zen-border-hover: rgba(79, 70, 229, 0.4);
+  --zen-border-active: #4f46e5;
+  
+  --zen-text-primary: #0f172a;
+  --zen-text-secondary: #475569;
+  --zen-text-muted: #94a3b8;
+  
+  --zen-primary: #4f46e5;
+  --zen-primary-hover: #4338ca;
+  --zen-primary-active: #3730a3;
+  --zen-primary-subtle: #eef2ff;
+  
+  --zen-danger: #ef4444;
+  --zen-danger-subtle: #fef2f2;
+  --zen-success: #10b981;
+  --zen-success-subtle: #ecfdf5;
+
+  /* 阴影体系 */
+  --zen-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  --zen-shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -2px rgba(15, 23, 42, 0.04);
+  --zen-shadow-lg: 0 20px 35px -10px rgba(15, 23, 42, 0.08), 0 8px 16px -6px rgba(15, 23, 42, 0.04);
+  --zen-shadow-focus: 0 0 0 3px rgba(79, 70, 229, 0.18);
+
+  /* 圆角与间距 */
+  --zen-radius-sm: 8px;
+  --zen-radius-md: 12px;
+  --zen-radius-lg: 18px;
+  --zen-radius-full: 9999px;
+
+  /* 物理弹簧过渡 */
+  --zen-spring-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --zen-transition-fast: 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  --zen-transition-normal: 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--zen-bg);
+  color: var(--zen-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 选项卡片四态样式 */
+.zen-option-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: var(--zen-surface);
+  border: 1.5px solid var(--zen-border);
+  border-radius: var(--zen-radius-md);
+  cursor: pointer;
+  user-select: none;
+  transition: transform var(--zen-transition-fast), border-color var(--zen-transition-fast), background var(--zen-transition-fast), box-shadow var(--zen-transition-fast);
+  box-shadow: var(--zen-shadow-sm);
+}
+
+.zen-option-card:hover {
+  transform: translateY(-1.5px);
+  border-color: var(--zen-border-hover);
+  box-shadow: var(--zen-shadow-md);
+}
+
+.zen-option-card:active {
+  transform: scale(0.98);
+  box-shadow: var(--zen-shadow-sm);
+}
+
+.zen-option-card.is-selected {
+  background: var(--zen-primary-subtle);
+  border-color: var(--zen-primary);
+  box-shadow: 0 0 0 1px var(--zen-primary), var(--zen-shadow-md);
+}
+
+.zen-key-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: #f1f5f9;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--zen-text-secondary);
+  transition: all var(--zen-transition-fast);
+  flex-shrink: 0;
+}
+
+.zen-option-card.is-selected .zen-key-badge {
+  background: var(--zen-primary);
+  color: #ffffff;
+  border-color: var(--zen-primary);
+}
+
+.zen-option-label {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--zen-text-primary);
+  flex-grow: 1;
+}
+
+.zen-option-card.is-selected .zen-option-label {
+  color: var(--zen-primary-active);
+  font-weight: 600;
+}

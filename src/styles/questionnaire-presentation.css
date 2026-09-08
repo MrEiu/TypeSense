@@ -1,0 +1,794 @@
+/**
+ * questionnaire-presentation.css
+ *
+ * Formbricks 风格“一题一页 (One-Question-Per-Page)”沉浸式问卷样式
+ * 职责：负责居中视窗舞台、步进卡片进出场动效、Formbricks 标志性右下角步进器、OK按键及四大题型展示。
+ */
+
+/* 全局基底 */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  background-image: 
+    radial-gradient(circle at 18% 20%, rgba(99, 102, 241, 0.14) 0%, transparent 45%),
+    radial-gradient(circle at 82% 80%, rgba(20, 184, 166, 0.1) 0%, transparent 50%),
+    linear-gradient(to bottom, #090d16, #0e1626);
+  background-attachment: fixed;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ============================================================ */
+/* 顶部极简流体进度条 (Formbricks Minimal Top Bar)               */
+/* ============================================================ */
+.formbricks-top-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  z-index: 100;
+}
+
+.formbricks-top-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #6366f1, #a855f7, #06b6d4);
+  transition: width 400ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.6);
+}
+
+.formbricks-header-actions {
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  z-index: 101;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.action-pill-btn {
+  background: rgba(18, 24, 38, 0.7);
+  backdrop-filter: var(--backdrop-blur);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  font-size: 0.775rem;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-pill-btn:hover {
+  background: rgba(30, 41, 59, 0.9);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-medium);
+}
+
+/* ============================================================ */
+/* 视口居中舞台与卡片切换 (Immersive Centered Stage)              */
+/* ============================================================ */
+.formbricks-viewport-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 24px 100px 24px;
+  min-height: 100vh;
+  position: relative;
+}
+
+.formbricks-step-container {
+  width: 100%;
+  max-width: 720px;
+  position: relative;
+  perspective: 1000px;
+}
+
+/* 步骤卡片与过渡动效 */
+.formbricks-step-card {
+  width: 100%;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.formbricks-step-card.animate-slide-up-in {
+  animation: slideUpIn 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.formbricks-step-card.animate-slide-down-in {
+  animation: slideDownIn 320ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideUpIn {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================ */
+/* 步骤 0: 欢迎起始屏 (Welcome Screen)                           */
+/* ============================================================ */
+.welcome-screen-box {
+  background: var(--color-bg-card);
+  backdrop-filter: var(--backdrop-blur);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 44px 40px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  position: relative;
+}
+
+.welcome-screen-box::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #6366f1, #38bdf8, #a855f7);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.welcome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--color-primary-400);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  width: fit-content;
+}
+
+.welcome-title {
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+}
+
+.welcome-description {
+  font-size: 1.05rem;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.welcome-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.welcome-action-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+/* ============================================================ */
+/* 题目头部 (Question Header)                                   */
+/* ============================================================ */
+.question-headline-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.question-prompt-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.question-seq-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-family-mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--color-primary-400);
+  padding: 4px 10px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius-sm);
+  margin-top: 2px;
+}
+
+.question-text-title {
+  font-size: 1.55rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+
+.question-text-title .required-star {
+  color: var(--color-accent-rose);
+  margin-left: 4px;
+}
+
+.question-sub-prompt {
+  margin-left: 54px;
+  font-size: 0.925rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.question-interactive-body {
+  margin-left: 54px;
+}
+
+/* ============================================================ */
+/* Formbricks 标志性“确定 / OK ↵”操作按键                      */
+/* ============================================================ */
+.formbricks-action-footer {
+  margin-left: 54px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.formbricks-ok-btn {
+  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  border: none;
+  color: #fff;
+  padding: 12px 28px;
+  border-radius: var(--radius-md);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  transition: all var(--transition-fast);
+}
+
+.formbricks-ok-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+  background: linear-gradient(135deg, #7174ff, #5b53f5);
+}
+
+.formbricks-ok-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.formbricks-key-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-badge {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-family-mono);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+/* ============================================================ */
+/* 组件 1: 单选题 (Single Choice - Formbricks 快捷键风格)        */
+/* ============================================================ */
+.formbricks-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formbricks-option-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  background: rgba(18, 24, 38, 0.65);
+  backdrop-filter: var(--backdrop-blur);
+  border: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+  position: relative;
+}
+
+.formbricks-option-card:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border-medium);
+  transform: translateX(4px);
+}
+
+.formbricks-option-card.is-selected {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: var(--color-border-selected);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25), var(--shadow-glow-primary);
+}
+
+/* 快捷键英文字母徽章 (A, B, C...) */
+.formbricks-hotkey-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-family-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.formbricks-option-card.is-selected .formbricks-hotkey-badge {
+  background: var(--color-primary-500);
+  color: #fff;
+  border-color: var(--color-primary-400);
+}
+
+.formbricks-option-text-cluster {
+  flex: 1;
+}
+
+.formbricks-option-label {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.formbricks-option-hint {
+  font-size: 0.825rem;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+
+/* ============================================================ */
+/* 组件 2: 多选题 (Multiple Choice)                              */
+/* ============================================================ */
+.formbricks-checkbox-box {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--color-border-medium);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.formbricks-checkbox-icon {
+  width: 14px;
+  height: 14px;
+  stroke: #fff;
+  stroke-width: 3;
+  fill: none;
+  stroke-dasharray: 22;
+  stroke-dashoffset: 22;
+  transition: stroke-dashoffset var(--transition-fast);
+}
+
+.formbricks-option-card.is-selected .formbricks-checkbox-box {
+  background: var(--color-primary-500);
+  border-color: var(--color-primary-400);
+}
+
+.formbricks-option-card.is-selected .formbricks-checkbox-icon {
+  stroke-dashoffset: 0;
+}
+
+.formbricks-multiple-helper {
+  margin-top: 14px;
+  font-size: 0.825rem;
+  color: var(--color-text-muted);
+}
+
+/* ============================================================ */
+/* 组件 3: 填空 / 文本输入 (Text Input)                          */
+/* ============================================================ */
+.formbricks-text-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.formbricks-input-field {
+  width: 100%;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid var(--color-border-subtle);
+  border-bottom: 2px solid var(--color-primary-400);
+  border-radius: var(--radius-md);
+  padding: 18px 22px;
+  font-size: 1.15rem;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.formbricks-input-field:focus {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: var(--color-primary-400);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.formbricks-input-field::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.formbricks-textarea-field {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.formbricks-char-counter {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 0.775rem;
+  font-family: var(--font-family-mono);
+  color: var(--color-text-muted);
+}
+
+/* ============================================================ */
+/* 组件 4: 李克特量表 (Likert Scale)                             */
+/* ============================================================ */
+.formbricks-likert-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.formbricks-likert-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+  gap: 12px;
+}
+
+.formbricks-likert-btn {
+  background: rgba(18, 24, 38, 0.65);
+  backdrop-filter: var(--backdrop-blur);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--color-text-secondary);
+}
+
+.formbricks-likert-btn:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border-medium);
+  transform: translateY(-2px);
+  color: var(--color-text-primary);
+}
+
+.formbricks-likert-btn.is-selected {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25));
+  border-color: var(--color-primary-400);
+  box-shadow: var(--shadow-glow-primary);
+  color: #fff;
+}
+
+.formbricks-likert-num {
+  font-size: 1.4rem;
+  font-weight: 800;
+  font-family: var(--font-family-mono);
+  color: #fff;
+}
+
+.formbricks-likert-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.formbricks-likert-endpoints {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  padding: 0 4px;
+}
+
+.formbricks-likert-desc-banner {
+  background: rgba(99, 102, 241, 0.1);
+  border-left: 3px solid var(--color-primary-400);
+  padding: 12px 16px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+/* ============================================================ */
+/* 步骤 N+1: 问卷完成屏 (Completion Screen)                      */
+/* ============================================================ */
+.completion-screen-box {
+  background: var(--color-bg-card);
+  backdrop-filter: var(--backdrop-blur);
+  border: 1px solid rgba(20, 184, 166, 0.3);
+  border-radius: var(--radius-lg);
+  padding: 44px 40px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+}
+
+.completion-icon-badge {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(20, 184, 166, 0.16);
+  color: var(--color-accent-teal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  box-shadow: 0 0 24px rgba(20, 184, 166, 0.25);
+}
+
+.completion-title {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--color-text-primary);
+}
+
+.completion-subtitle {
+  font-size: 1rem;
+  color: var(--color-text-secondary);
+  max-width: 520px;
+}
+
+.payload-preview-box {
+  width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  text-align: left;
+  background: #090e1a;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  font-family: var(--font-family-mono);
+  font-size: 0.825rem;
+  color: #818cf8;
+}
+
+/* ============================================================ */
+/* 右下角 Formbricks 悬浮步进器 (Navigation Dock)                */
+/* ============================================================ */
+.formbricks-nav-dock {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 100;
+}
+
+.nav-dock-btn-group {
+  display: flex;
+  align-items: center;
+  background: rgba(18, 24, 38, 0.85);
+  backdrop-filter: var(--backdrop-blur);
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.nav-dock-arrow-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  width: 44px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.nav-dock-arrow-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-dock-arrow-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.nav-dock-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--color-border-subtle);
+}
+
+.nav-dock-counter {
+  padding: 0 14px;
+  font-size: 0.825rem;
+  font-family: var(--font-family-mono);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+/* ============================================================ */
+/* JSON 审查抽屉 (Proof of Decoupling Drawer Modal)              */
+/* ============================================================ */
+.json-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: var(--backdrop-blur);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-normal);
+}
+
+.json-modal-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.json-modal-card {
+  background: #0f172a;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-lg);
+  max-width: 780px;
+  width: 100%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.json-modal-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.json-modal-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.json-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  font-family: var(--font-family-mono);
+  font-size: 0.85rem;
+  color: #a5b4fc;
+  background: #090e1a;
+  line-height: 1.5;
+}
+
+.json-modal-footer {
+  padding: 14px 24px;
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 响应式适配 */
+@media (max-width: 640px) {
+  .formbricks-viewport-stage {
+    padding: 60px 16px 90px 16px;
+  }
+  .welcome-screen-box,
+  .completion-screen-box {
+    padding: 28px 20px;
+  }
+  .welcome-title,
+  .completion-title {
+    font-size: 1.6rem;
+  }
+  .question-text-title {
+    font-size: 1.25rem;
+  }
+  .question-sub-prompt,
+  .question-interactive-body,
+  .formbricks-action-footer {
+    margin-left: 0;
+  }
+  .formbricks-likert-bar {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  .formbricks-likert-btn {
+    padding: 12px 4px;
+  }
+  .formbricks-likert-num {
+    font-size: 1.1rem;
+  }
+  .formbricks-likert-label {
+    display: none;
+  }
+}
