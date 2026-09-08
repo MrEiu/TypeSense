@@ -12,6 +12,7 @@ import { SurveyService } from './survey-service';
 import { ResponseService } from './response-service';
 import { DocumentService } from './document-service';
 import { AiGeneratorService } from './ai-generator-service';
+import { ConfigService } from './config-service';
 
 const app = express();
 const PORT = 3001;
@@ -307,7 +308,78 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
   }
 });
 
+// ==================== 模型配置与动态发现接口 (零预设) ====================
+
+/**
+ * 获取当前模型配置 (出于安全考虑，API Key 仅暴露掩码信息)
+ */
+app.get('/api/ai/config', (_req: Request, res: Response) => {
+  try {
+    const config = ConfigService.getConfig();
+    const maskedApiKey = config.apiKey
+      ? `${config.apiKey.slice(0, 4)}****${config.apiKey.slice(-4)}`
+      : '';
+    res.json({
+      baseURL: config.baseURL,
+      apiKeyMasked: maskedApiKey,
+      hasApiKey: !!config.apiKey,
+      model: config.model,
+    });
+  } catch (err: any) {
+    console.error('[API] getConfig 异常:', err);
+    res.status(500).json({ error: '获取模型配置失败' });
+  }
+});
+
+/**
+ * 保存模型配置
+ */
+app.post('/api/ai/config', (req: Request, res: Response) => {
+  try {
+    const { baseURL, apiKey, model } = req.body || {};
+    const current = ConfigService.getConfig();
+    // 若 apiKey 未填写或传入的是掩码，则沿用已有密钥
+    const newApiKey =
+      apiKey && !apiKey.includes('****') ? apiKey.trim() : current.apiKey;
+
+    const saved = ConfigService.saveConfig({
+      baseURL: baseURL !== undefined ? baseURL : current.baseURL,
+      apiKey: newApiKey,
+      model: model !== undefined ? model : current.model,
+    });
+
+    res.json({
+      success: true,
+      baseURL: saved.baseURL,
+      apiKeyMasked: saved.apiKey ? `${saved.apiKey.slice(0, 4)}****${saved.apiKey.slice(-4)}` : '',
+      hasApiKey: !!saved.apiKey,
+      model: saved.model,
+    });
+  } catch (err: any) {
+    console.error('[API] saveConfig 异常:', err);
+    res.status(500).json({ error: '保存模型配置失败' });
+  }
+});
+
+/**
+ * 动态获取可用模型列表 (零预设，直接向服务商接口拉取)
+ */
+app.post('/api/ai/models', async (req: Request, res: Response) => {
+  try {
+    const { baseURL, apiKey } = req.body || {};
+    const models = await ConfigService.fetchAvailableModels({
+      baseURL,
+      apiKey: apiKey && !apiKey.includes('****') ? apiKey : undefined,
+    });
+    res.json({ success: true, models });
+  } catch (err: any) {
+    console.error('[API] fetchAvailableModels 异常:', err);
+    res.status(400).json({ success: false, error: err?.message || '获取模型列表失败' });
+  }
+});
+
 app.listen(PORT, () => {
   console.info(`[TypeSense Backend] 服务已启动，监听在 http://localhost:${PORT}`);
 });
+
 

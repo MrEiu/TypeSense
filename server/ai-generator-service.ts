@@ -18,6 +18,7 @@ import type {
 } from '../src/schema/questionnaire-schema-types';
 import { db } from './db';
 import { generateSessionId } from './id-generator';
+import { ConfigService } from './config-service';
 
 export interface GenerationOptions {
   documentId?: string;
@@ -58,18 +59,16 @@ export type PipelineEvent =
   | { type: 'error'; error: string };
 
 export class AiGeneratorService {
-  private static openaiClient: OpenAI | null = null;
+  private static getOpenAI(): { client: OpenAI; model: string } | null {
+    const config = ConfigService.getConfig();
+    if (!config.apiKey || !config.model) return null;
 
-  private static getOpenAI(): OpenAI | null {
-    if (this.openaiClient) return this.openaiClient;
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return null;
-
-    this.openaiClient = new OpenAI({
-      apiKey,
-      baseURL: process.env.OPENAI_BASE_URL || undefined,
+    const client = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: config.baseURL || undefined,
     });
-    return this.openaiClient;
+
+    return { client, model: config.model };
   }
 
   /**
@@ -206,13 +205,13 @@ export class AiGeneratorService {
     userPrompt: string,
     targetCount: number
   ): Promise<SurveyBlueprint> {
-    const openai = this.getOpenAI();
+    const ai = this.getOpenAI();
     const truncatedDoc = docText.slice(0, 5000);
 
-    if (openai) {
+    if (ai) {
       try {
-        const response = await openai.chat.completions.create({
-          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        const response = await ai.client.chat.completions.create({
+          model: ai.model,
           response_format: { type: 'json_object' },
           messages: [
             {
@@ -265,15 +264,15 @@ Rule: Sum of dimension questionCounts should equal ${targetCount}. Variable name
     userPrompt: string,
     onProgress: (q: QuestionItemModel, index: number, total: number) => void
   ): Promise<QuestionItemModel[]> {
-    const openai = this.getOpenAI();
+    const ai = this.getOpenAI();
     const questions: QuestionItemModel[] = [];
     let globalIndex = 1;
     const totalCount = blueprint.dimensions.reduce((acc, d) => acc + d.questionCount, 0);
 
-    if (openai) {
+    if (ai) {
       try {
-        const response = await openai.chat.completions.create({
-          model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        const response = await ai.client.chat.completions.create({
+          model: ai.model,
           response_format: { type: 'json_object' },
           messages: [
             {

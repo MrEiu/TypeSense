@@ -1,20 +1,22 @@
 {
   "name": "typesense-questionnaire",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "server": "tsx server/server.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "bump": "tsx scripts/bump-version.ts"
+    "bump": "tsx scripts/bump-version.ts",
+    "init": "tsx scripts/init-config.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
     "@types/pdf-parse": "^1.1.5",
+    "@types/prompts": "^2.4.9",
     "@vitejs/plugin-vue": "^6.0.8",
     "tsx": "^4.23.13",
     "typescript": "^5.7.2",
@@ -35,6 +37,7 @@
     "nanoid": "^6.0.1",
     "openai": "^7.10.0",
     "pdf-parse": "^2.4.5",
+    "prompts": "^2.4.2",
     "vue": "^3.5.42"
   }
 }
