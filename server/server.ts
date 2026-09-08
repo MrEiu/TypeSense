@@ -7,8 +7,11 @@
 
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import { SurveyService } from './survey-service';
 import { ResponseService } from './response-service';
+import { DocumentService } from './document-service';
+import { AiGeneratorService } from './ai-generator-service';
 
 const app = express();
 const PORT = 3001;
@@ -167,6 +170,144 @@ app.get('/api/surveys/:id/responses', (req: Request, res: Response) => {
   }
 });
 
+// ==================== 知识库文档管理接口 ====================
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 }, // 最大 30MB
+});
+
+/**
+ * 上传知识库文档 (PDF, Word docx, Markdown, TXT)
+ */
+app.post('/api/documents/upload', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: '请选择要上传的文件' });
+      return;
+    }
+    const doc = await DocumentService.processUpload({
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      buffer: file.buffer,
+    });
+    res.status(201).json({ success: true, document: doc });
+  } catch (err: any) {
+    console.error('[API] uploadDocument 异常:', err);
+    res.status(500).json({ error: err?.message || '文档上传与解析失败' });
+  }
+});
+
+/**
+ * 获取所有已上传知识文档列表
+ */
+app.get('/api/documents', (_req: Request, res: Response) => {
+  try {
+    const list = DocumentService.listDocuments();
+    res.json(list);
+  } catch (err) {
+    console.error('[API] listDocuments 异常:', err);
+    res.status(500).json({ error: '获取文档列表失败' });
+  }
+});
+
+/**
+ * 获取单个文档详情
+ */
+app.get('/api/documents/:id', (req: Request, res: Response) => {
+  try {
+    const doc = DocumentService.getDocument(req.params.id);
+    if (!doc) {
+      res.status(404).json({ error: '文档不存在' });
+      return;
+    }
+    res.json(doc);
+  } catch (err) {
+    console.error('[API] getDocument 异常:', err);
+    res.status(500).json({ error: '获取文档详情失败' });
+  }
+});
+
+/**
+ * 删除文档
+ */
+app.delete('/api/documents/:id', (req: Request, res: Response) => {
+  try {
+    const success = DocumentService.deleteDocument(req.params.id);
+    res.json({ success });
+  } catch (err) {
+    console.error('[API] deleteDocument 异常:', err);
+    res.status(500).json({ error: '删除文档失败' });
+  }
+});
+
+// ==================== AI 智能问卷生成流式接口 ====================
+
+/**
+ * SSE 流式生成问卷 (四阶渐进式流水线)
+ */
+app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
+  const { documentId, prompt, targetCount, enableJumpLogic } = req.body || {};
+
+  // 设置 SSE 响应头
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const sendEvent = (event: any) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  try {
+    let documentText = '';
+    if (documentId) {
+      const doc = DocumentService.getDocument(documentId);
+      if (doc) {
+        documentText = doc.extractedText;
+      }
+    }
+
+    const generatedSurvey = await AiGeneratorService.executePipeline(
+      {
+        documentId,
+        documentText,
+        prompt: prompt || '全面评估团队在业务开发、架构稳定性与工具链落地中的真实实践',
+        targetCount: Number(targetCount) || 8,
+        enableJumpLogic: enableJumpLogic !== false,
+      },
+      (event) => {
+        sendEvent(event);
+      }
+    );
+
+    // 自动保存进正式问卷库
+    const saved = SurveyService.createSurvey({
+      title: generatedSurvey.title,
+      description: generatedSurvey.description,
+      schema: generatedSurvey as any,
+    });
+
+    sendEvent({
+      type: 'persisted',
+      surveyId: saved.id,
+      slug: saved.slug,
+      accessUrl: `/survey.html?id=${saved.id}`,
+      canvasUrl: `/admin.html?id=${saved.id}`,
+    });
+
+    res.write('data: [DONE]\n\n');
+    res.end();
+  } catch (err: any) {
+    sendEvent({ type: 'error', error: err?.message || '生成失败' });
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+});
+
 app.listen(PORT, () => {
   console.info(`[TypeSense Backend] 服务已启动，监听在 http://localhost:${PORT}`);
 });
+

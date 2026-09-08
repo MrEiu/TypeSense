@@ -36,6 +36,7 @@ import {
   type SurveyMetadataItem,
 } from '../services/questionnaire-repository-service';
 import type { QuestionnaireModel } from '../schema/questionnaire-schema-types';
+import AiSurveyStudioModal from './components/AiSurveyStudioModal.vue';
 
 // Naive UI Zen Paper 主题配置
 const themeOverrides: GlobalThemeOverrides = {
@@ -64,6 +65,7 @@ const isPublishModalOpen = ref(false);
 const isPublishing = ref(false);
 const publishJsonText = ref('');
 const copiedSurveyId = ref<string | null>(null);
+const isAiStudioOpen = ref(false);
 
 // 短链弹窗状态
 const shortLinkModalOpen = ref(false);
@@ -212,6 +214,10 @@ onMounted(() => {
           </div>
 
           <div class="navbar-actions">
+            <button class="nav-ai-btn" @click="isAiStudioOpen = true">
+              <Sparkles class="btn-icon" />
+              <span>AI 智造问卷</span>
+            </button>
             <a href="/admin.html" class="nav-ghost-btn" title="查看拓扑流程画布">
               <Layers class="btn-icon" />
               <span>流程拓扑幕布</span>
@@ -407,6 +413,9 @@ onMounted(() => {
             </div>
           </template>
         </NModal>
+
+        <!-- 弹窗 3：AI 问卷智造工坊 Modal -->
+        <AiSurveyStudioModal v-model:show="isAiStudioOpen" @created="loadSurveys" />
       </div>
     </NMessageProvider>
   </NConfigProvider>
@@ -471,6 +480,31 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.nav-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: var(--zen-radius-sm);
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border: none;
+  color: #ffffff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--zen-transition-fast);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+}
+
+.nav-ai-btn:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.45);
+}
+
+.nav-ai-btn:active {
+  transform: scale(0.97);
 }
 
 .nav-ghost-btn {

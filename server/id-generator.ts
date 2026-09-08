@@ -24,3 +24,16 @@ const generateResponseUid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz
 export function generateResponseId(): string {
   return `res_${generateResponseUid()}`;
 }
+
+// 知识库文档全局主键算法生成器 (以 doc_ 开头)
+const generateDocUid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 10);
+export function generateDocumentId(): string {
+  return `doc_${generateDocUid()}`;
+}
+
+// AI 生成会话全局主键算法生成器 (以 ses_ 开头)
+const generateSessionUid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 10);
+export function generateSessionId(): string {
+  return `ses_${generateSessionUid()}`;
+}
+
