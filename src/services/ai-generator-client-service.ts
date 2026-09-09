@@ -130,6 +130,30 @@ export class AiGeneratorClientService {
   }
 
   /**
+   * 极速直出全卷 (一步到位生成完整问卷)
+   */
+  public static async generateDirectSurvey(params: {
+    prompt: string;
+    documentId?: string;
+    targetCount: number;
+    enableJumpLogic?: boolean;
+  }): Promise<QuestionnaireModel> {
+    const resp = await fetch('/api/ai/generate-direct', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `极速生成问卷失败: HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    return data.survey as QuestionnaireModel;
+  }
+
+  /**
    * 独立规划全景蓝图与题组块 (Stage 1)
    */
   public static async planBlueprint(params: {

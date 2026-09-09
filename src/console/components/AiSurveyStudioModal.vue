@@ -69,6 +69,10 @@ const blueprint = ref<SurveyBlueprintItem | null>(null);
 const blocks = ref<InteractiveBlock[]>([]);
 const currentBlockIndex = ref<number>(0);
 
+// 极速直出全卷实体
+const directSurvey = ref<QuestionnaireModel | null>(null);
+const isDirectGenerating = ref(false);
+
 const isPlanning = ref(false);
 const isGeneratingChunk = ref(false);
 const isAutoRunning = ref(false);
@@ -85,12 +89,17 @@ const refineInstruction = ref('');
 const persistedInfo = ref<{ surveyId: string; accessUrl: string; canvasUrl: string } | null>(null);
 
 // 响应式全景问卷领域模型
-const activeSurveyData = computed<QuestionnaireModel>(() => ({
-  id: 'ai_studio_active_dag',
-  title: blueprint.value?.title || 'AI 全景蓝图拓扑幕布',
-  description: blueprint.value?.description || userPrompt.value || '正在动态生成中...',
-  questions: allQuestions.value,
-}));
+const activeSurveyData = computed<QuestionnaireModel>(() => {
+  if (directSurvey.value) {
+    return directSurvey.value;
+  }
+  return {
+    id: 'ai_studio_active_dag',
+    title: blueprint.value?.title || 'AI 全景蓝图拓扑幕布',
+    description: blueprint.value?.description || userPrompt.value || '正在动态生成中...',
+    questions: allQuestions.value,
+  };
+});
 
 const activeDoc = computed(() => {
   return documents.value.find((d) => d.id === selectedDocId.value) || null;
@@ -114,6 +123,7 @@ const allQuestions = computed(() => {
 
 // 计算当前待生成的组块骨架（传递给画布进行拓扑渲染）
 const pendingBlocksForCanvas = computed(() => {
+  if (directSurvey.value) return [];
   return blocks.value
     .filter((b) => b.status === 'pending' || b.status === 'generating')
     .map((b) => ({
@@ -185,6 +195,40 @@ async function handleDeleteDoc(id: string) {
 }
 
 /**
+ * 极简极速直出一键生成问卷 (Direct Lean Survey Generation)
+ */
+async function handleDirectGenerate() {
+  if (!userPrompt.value.trim() && !selectedDocId.value) {
+    errorMessage.value = '请先输入调研诉求或选择知识文档';
+    return;
+  }
+
+  isDirectGenerating.value = true;
+  errorMessage.value = null;
+  statusMessage.value = '正在基于极简契约自主推演全卷题目与逻辑流向 (预计 2~4 秒)...';
+  persistedInfo.value = null;
+  blueprint.value = null;
+  blocks.value = [];
+
+  try {
+    const survey = await AiGeneratorClientService.generateDirectSurvey({
+      prompt: userPrompt.value,
+      documentId: selectedDocId.value || undefined,
+      targetCount: targetCount.value,
+      enableJumpLogic: enableJumpLogic.value,
+    });
+
+    directSurvey.value = survey;
+    statusMessage.value = `🎉 问卷已极速推演完毕！共生成 ${survey.questions.length} 道题目拓扑。`;
+    await syncCanvas();
+  } catch (err: any) {
+    errorMessage.value = err?.message || '极速生成问卷失败';
+  } finally {
+    isDirectGenerating.value = false;
+  }
+}
+
+/**
  * Stage 1: 规划问卷架构与题组块并在无限画布上呈现全景骨架
  */
 async function handlePlanBlueprint() {
@@ -197,6 +241,7 @@ async function handlePlanBlueprint() {
   errorMessage.value = null;
   statusMessage.value = '正在深入推导调研脉络，在无限幕布上规划全景拓扑骨架...';
   persistedInfo.value = null;
+  directSurvey.value = null;
 
   try {
     const result = await AiGeneratorClientService.planBlueprint({
@@ -334,14 +379,18 @@ async function handleStartAutoPlay() {
  * Stage 3: 发布问卷并入库
  */
 async function handleFinalizeSurvey() {
-  if (!blueprint.value || allQuestions.value.length === 0) return;
+  const currentTitle = directSurvey.value?.title || blueprint.value?.title || 'AI 智造问卷';
+  const currentDesc = directSurvey.value?.description || blueprint.value?.description || '基于极简契约生成。';
+  const currentQs = directSurvey.value?.questions || allQuestions.value;
+
+  if (!currentQs || currentQs.length === 0) return;
 
   statusMessage.value = '正在校验全卷有向图无环拓扑并保存入库...';
   try {
     const result = await AiGeneratorClientService.finalizeSurvey({
-      title: blueprint.value.title,
-      description: blueprint.value.description,
-      questions: allQuestions.value,
+      title: currentTitle,
+      description: currentDesc,
+      questions: currentQs,
     });
 
     persistedInfo.value = {
@@ -363,6 +412,8 @@ async function handleFinalizeSurvey() {
 function resetStudioState() {
   userPrompt.value = '';
   selectedDocId.value = null;
+  directSurvey.value = null;
+  isDirectGenerating.value = false;
   blueprint.value = null;
   blocks.value = [];
   currentBlockIndex.value = 0;
@@ -433,12 +484,12 @@ onMounted(() => {
           </span>
         </div>
 
-        <div v-if="blueprint || userPrompt" class="header-extra-actions">
+        <div v-if="blueprint || directSurvey || userPrompt" class="header-extra-actions">
           <button
             type="button"
             class="header-reset-btn"
             title="清空当前问卷草稿，开启新问卷"
-            :disabled="isPlanning || isGeneratingChunk || isAutoRunning"
+            :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
             @click="resetStudioState"
           >
             <RotateCcw :size="13" />
@@ -463,7 +514,7 @@ onMounted(() => {
               v-model:value="selectedDocId"
               :options="docOptions"
               placeholder="从知识库选择已有文档..."
-              :disabled="isPlanning || isGeneratingChunk || isAutoRunning"
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
               size="small"
               class="sidebar-select"
             />
@@ -478,7 +529,7 @@ onMounted(() => {
               type="button"
               class="doc-upload-icon-btn"
               title="上传新文档"
-              :disabled="isPlanning || isGeneratingChunk || isUploading"
+              :disabled="isPlanning || isGeneratingChunk || isUploading || isDirectGenerating"
               @click="triggerFileSelect"
             >
               <UploadCloud :size="14" />
@@ -510,7 +561,7 @@ onMounted(() => {
               type="textarea"
               :rows="3"
               placeholder="输入调研诉求，如：员工离职倾向与团队满意度、新零售消费体验..."
-              :disabled="isPlanning || isGeneratingChunk || isAutoRunning"
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
               size="small"
             />
           </div>
@@ -525,7 +576,7 @@ onMounted(() => {
               :min="3"
               :max="24"
               :step="1"
-              :disabled="isPlanning || isGeneratingChunk || isAutoRunning"
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
             />
           </div>
 
@@ -533,21 +584,33 @@ onMounted(() => {
             <label class="field-label">启用非线性条件跳转 (Jump)</label>
             <NSwitch
               v-model:value="enableJumpLogic"
-              :disabled="isPlanning || isGeneratingChunk || isAutoRunning"
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
               size="small"
             />
           </div>
 
-          <!-- 规划蓝图主触发按钮 -->
-          <button
-            type="button"
-            class="primary-action-btn plan-btn"
-            :disabled="isPlanning || isGeneratingChunk || isAutoRunning || (!userPrompt.trim() && !selectedDocId)"
-            @click="handlePlanBlueprint"
-          >
-            <Compass :size="16" class="spin-on-active" :class="{ 'anim-spin': isPlanning }" />
-            <span>{{ isPlanning ? '正在规划全景蓝图拓扑...' : '✨ 规划全景架构 (激活无限幕布)' }}</span>
-          </button>
+          <!-- 双模式触发动作组 -->
+          <div class="actions-stack">
+            <button
+              type="button"
+              class="primary-action-btn direct-btn"
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating || (!userPrompt.trim() && !selectedDocId)"
+              @click="handleDirectGenerate"
+            >
+              <Sparkles :size="16" class="spin-on-active" :class="{ 'anim-spin': isDirectGenerating }" />
+              <span>{{ isDirectGenerating ? '正在极速直出全卷...' : '✨ AI 极速一键智造 (一步直出)' }}</span>
+            </button>
+
+            <button
+              type="button"
+              class="secondary-action-btn blueprint-btn"
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating || (!userPrompt.trim() && !selectedDocId)"
+              @click="handlePlanBlueprint"
+            >
+              <Compass :size="14" class="spin-on-active" :class="{ 'anim-spin': isPlanning }" />
+              <span>{{ isPlanning ? '正在规划题组块...' : '📐 规划题组分步干预' }}</span>
+            </button>
+          </div>
         </div>
 
         <!-- 3. 题组块流水线概览 (蓝图规划成功后展示) -->
@@ -584,96 +647,122 @@ onMounted(() => {
 
       <!-- 右侧主视界：自组织无限幕布原生容器与悬浮控制舱 -->
       <main class="right-canvas-stage">
-        <!-- 当尚未规划蓝图时的引导遮罩 -->
-        <div v-if="!blueprint" class="canvas-empty-guide">
+        <!-- 当尚未规划蓝图且未直出时的引导遮罩 -->
+        <div v-if="!blueprint && !directSurvey" class="canvas-empty-guide">
           <div class="guide-sparkle-circle">
             <Compass :size="38" />
           </div>
           <h3>自组织无限幕布待命中</h3>
-          <p>在左侧输入调研诉求并点击「规划全景架构」，AI 将在无限幕布上秒级绘制出有向图拓扑骨架与递进题组块。</p>
+          <p>在左侧输入调研诉求并点击「AI 极速一键智造」，AI 将在 2~4 秒内自主推演全卷题目并在幕布上呈现拓扑与流向。</p>
         </div>
 
         <!-- 核心视口：基于 Vue Flow 的全景响应式画布 -->
-        <div v-show="blueprint" class="studio-infinite-canvas-host">
+        <div v-show="blueprint || directSurvey" class="studio-infinite-canvas-host">
           <SurveyFlowCanvas
-            v-if="blueprint"
+            v-if="blueprint || directSurvey"
             :questionnaire="activeSurveyData"
             :pending-blocks="pendingBlocksForCanvas"
           />
         </div>
 
         <!-- 顶部悬浮控制舱 (Floating Agent Cockpit) -->
-        <div v-if="blueprint" class="floating-cockpit">
+        <div v-if="blueprint || directSurvey" class="floating-cockpit">
           <!-- 状态通知胶囊 -->
           <div class="cockpit-bar">
             <div class="cockpit-left-status">
-              <div v-if="isPlanning || isGeneratingChunk || isAutoRunning" class="pulse-indicator-live"></div>
-              <CheckCircle2 v-else-if="isAllBlocksCompleted" :size="16" class="success-icon" />
+              <div v-if="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating" class="pulse-indicator-live"></div>
+              <CheckCircle2 v-else-if="directSurvey || isAllBlocksCompleted" :size="16" class="success-icon" />
               <Cpu v-else :size="16" />
               <span class="status-live-text">{{ errorMessage || statusMessage }}</span>
             </div>
 
             <!-- 动态干预与推进按钮群 -->
             <div class="cockpit-actions">
-              <!-- 人工干预修改意见按钮 -->
-              <button
-                v-if="currentBlock && currentBlock.status === 'completed'"
-                type="button"
-                class="cockpit-btn btn-intervene"
-                :disabled="isGeneratingChunk || isAutoRunning"
-                @click="showInterventionInput = !showInterventionInput"
-              >
-                <MessageSquare :size="14" />
-                <span>{{ showInterventionInput ? '收起干预' : '💬 提出干预重拟本块' }}</span>
-              </button>
+              <!-- 直出模式操作 -->
+              <template v-if="directSurvey">
+                <button
+                  type="button"
+                  class="cockpit-btn btn-intervene"
+                  :disabled="isDirectGenerating"
+                  @click="handleDirectGenerate"
+                >
+                  <RefreshCw :size="14" :class="{ 'anim-spin': isDirectGenerating }" />
+                  <span>重新生成</span>
+                </button>
+                <button
+                  v-if="!persistedInfo"
+                  type="button"
+                  class="cockpit-btn btn-publish"
+                  :disabled="isDirectGenerating"
+                  @click="handleFinalizeSurvey"
+                >
+                  <Sparkles :size="14" />
+                  <span>🎉 确认全卷并入库</span>
+                </button>
+              </template>
 
-              <!-- 生成当前组块 -->
-              <button
-                v-if="currentBlock && currentBlock.status === 'pending'"
-                type="button"
-                class="cockpit-btn btn-primary"
-                :disabled="isGeneratingChunk || isAutoRunning"
-                @click="handleGenerateSingleBlock(currentBlockIndex)"
-              >
-                <Zap :size="14" />
-                <span>⚡ 生成当前组块 ({{ currentBlock.name }})</span>
-              </button>
+              <!-- 蓝图组块模式操作 -->
+              <template v-else-if="blueprint">
+                <!-- 人工干预修改意见按钮 -->
+                <button
+                  v-if="currentBlock && currentBlock.status === 'completed'"
+                  type="button"
+                  class="cockpit-btn btn-intervene"
+                  :disabled="isGeneratingChunk || isAutoRunning"
+                  @click="showInterventionInput = !showInterventionInput"
+                >
+                  <MessageSquare :size="14" />
+                  <span>{{ showInterventionInput ? '收起干预' : '💬 提出干预重拟本块' }}</span>
+                </button>
 
-              <!-- 确认并生成下一块 -->
-              <button
-                v-if="currentBlock && currentBlock.status === 'completed' && !isAllBlocksCompleted"
-                type="button"
-                class="cockpit-btn btn-accent"
-                :disabled="isGeneratingChunk || isAutoRunning"
-                @click="handleConfirmAndNext"
-              >
-                <span>推进下一块 ➔</span>
-              </button>
+                <!-- 生成当前组块 -->
+                <button
+                  v-if="currentBlock && currentBlock.status === 'pending'"
+                  type="button"
+                  class="cockpit-btn btn-primary"
+                  :disabled="isGeneratingChunk || isAutoRunning"
+                  @click="handleGenerateSingleBlock(currentBlockIndex)"
+                >
+                  <Zap :size="14" />
+                  <span>⚡ 生成当前组块 ({{ currentBlock.name }})</span>
+                </button>
 
-              <!-- 连续自动流式推进 / 暂停 -->
-              <button
-                v-if="!isAllBlocksCompleted"
-                type="button"
-                class="cockpit-btn btn-autoplay"
-                :class="{ 'is-running': isAutoRunning }"
-                :disabled="isPlanning"
-                @click="handleStartAutoPlay"
-              >
-                <Pause v-if="isAutoRunning" :size="14" />
-                <Play v-else :size="14" />
-                <span>{{ isAutoRunning ? '⏸ 暂停自动流' : '▶️ 连续自动生成全部' }}</span>
-              </button>
+                <!-- 确认并生成下一块 -->
+                <button
+                  v-if="currentBlock && currentBlock.status === 'completed' && !isAllBlocksCompleted"
+                  type="button"
+                  class="cockpit-btn btn-accent"
+                  :disabled="isGeneratingChunk || isAutoRunning"
+                  @click="handleConfirmAndNext"
+                >
+                  <span>推进下一块 ➔</span>
+                </button>
 
-              <!-- 发布问卷 -->
-              <button
-                v-if="isAllBlocksCompleted && !persistedInfo"
-                type="button"
-                class="cockpit-btn btn-publish"
-                @click="handleFinalizeSurvey"
-              >
-                <Sparkles :size="14" />
-                <span>🎉 确认全卷并入库</span>
-              </button>
+                <!-- 连续自动流式推进 / 暂停 -->
+                <button
+                  v-if="!isAllBlocksCompleted"
+                  type="button"
+                  class="cockpit-btn btn-autoplay"
+                  :class="{ 'is-running': isAutoRunning }"
+                  :disabled="isPlanning"
+                  @click="handleStartAutoPlay"
+                >
+                  <Pause v-if="isAutoRunning" :size="14" />
+                  <Play v-else :size="14" />
+                  <span>{{ isAutoRunning ? '⏸ 暂停自动流' : '▶️ 连续自动生成全部' }}</span>
+                </button>
+
+                <!-- 发布问卷 -->
+                <button
+                  v-if="isAllBlocksCompleted && !persistedInfo"
+                  type="button"
+                  class="cockpit-btn btn-publish"
+                  @click="handleFinalizeSurvey"
+                >
+                  <Sparkles :size="14" />
+                  <span>🎉 确认全卷并入库</span>
+                </button>
+              </template>
             </div>
           </div>
 
@@ -976,6 +1065,44 @@ onMounted(() => {
 }
 
 .primary-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.actions-stack .primary-action-btn {
+  margin-top: 0;
+}
+
+.secondary-action-btn {
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #94a3b8;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.secondary-action-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.secondary-action-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }

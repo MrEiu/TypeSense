@@ -82,7 +82,109 @@ export class AiGeneratorService {
   }
 
   /**
-   * 执行双阶生成流水线
+  /**
+   * 极简高自由度单次直出生成 (Direct Lean Survey Generation)
+   * 只定义标准数据契约规范，彻底消除死板说教与保姆式限制，赋予 AI 最大推演自由度。
+   */
+  public static async generateDirectSurvey(options: GenerationOptions): Promise<QuestionnaireModel> {
+    const ai = this.getOpenAI();
+    const targetCount = Math.max(3, Math.min(30, options.targetCount || 8));
+    const docText = options.documentText ? options.documentText.slice(0, 25000) : '';
+    const prompt = (options.prompt || '').trim();
+    const enableJump = options.enableJumpLogic !== false;
+
+    const jumpConstraint = enableJump
+      ? `4. jump（按需配置）：跳转目标为题号 "qK"、"end"（正常完成）或 "exit"（提前甄别终止）。普通无跳转的题目必须完全省略 jump。`
+      : `4. 严禁生成任何 jump 或 set 字段。`;
+
+    const systemPrompt = `你是一位资深调研设计专家。请根据用户的调研诉求生成一份高质量的问卷。
+必须直接输出纯 JSON，严禁输出任何 Markdown 标记、代码块或多余解释，结构严格如下：
+
+{
+  "title": "问卷标题",
+  "description": "问卷说明与背景",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "题目题干",
+      "options": ["选项0", "选项1"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "exit" }
+      ]
+    }
+  ]
+}
+
+契约规范：
+1. id 严格为 q1, q2, q3... 顺序递增。
+2. type 仅限：single_choice（单选题）、multiple_choice（多选题）、likert_scale（量表题）、text_input（填空题）。
+3. 除 text_input 外必须提供 options 字符串数组；text_input 必须省略 options 并可提供 placeholder。
+${jumpConstraint}
+5. 自由度：根据实际调研场景与目标领域，完全自主决定题型组合、题干用词与题目流向。`;
+
+    const userPrompt = [
+      `调研需求：${prompt || '用户综合体验与满意度调研'}`,
+      `目标题目数量：${targetCount} 题左右`,
+      docText ? `参考资料：\n${docText}` : '参考资料：无',
+    ].join('\n');
+
+    try {
+      const response = await ai.client.chat.completions.create({
+        model: ai.model,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+
+      const raw = response.choices[0]?.message?.content;
+      if (!raw) {
+        throw new Error('模型未返回任何数据');
+      }
+
+      const parsed = this.extractAndParseJson<any>(raw, null);
+      if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+        throw new Error('模型返回的数据无法解析为有效问卷 JSON');
+      }
+
+      // 规范化题目模型
+      const sanitizedQuestions: QuestionItemModel[] = parsed.questions.map((q: any, i: number) => {
+        const id = `q${i + 1}`;
+        const type = ['single_choice', 'multiple_choice', 'likert_scale', 'text_input'].includes(q.type)
+          ? q.type
+          : 'single_choice';
+        return {
+          id,
+          type,
+          title: q.title || `题目 ${i + 1}`,
+          options: Array.isArray(q.options) ? q.options : undefined,
+          placeholder: q.placeholder,
+          required: q.required !== false,
+          set: q.set && typeof q.set === 'object' ? q.set : undefined,
+          jump: q.jump,
+        };
+      });
+
+      // 毫秒级单遍有向图防环守护
+      const safeQuestions = this.fastAcyclicGuard(sanitizedQuestions);
+
+      return {
+        id: `sur_ai_${generateSessionId().replace('ses_', '')}`,
+        title: parsed.title || 'AI 生成专项问卷',
+        description: parsed.description || '基于用户调研诉求智能推演构建。',
+        questions: safeQuestions,
+      };
+    } catch (err: any) {
+      console.error('[AiGeneratorService] generateDirectSurvey 异常:', err);
+      throw new Error(`AI 生成问卷失败: ${err?.message || '模型接口异常'}`);
+    }
+  }
+
+  /**
+   * 执行极速直出生成流水线
    */
   public static async executePipeline(
     options: GenerationOptions,
@@ -104,55 +206,29 @@ export class AiGeneratorService {
       options.documentId || null,
       options.prompt,
       options.targetCount,
-      'planning',
+      'generating',
       now,
       now
     );
 
     try {
-      const docText = options.documentText || '';
-      const targetCount = Math.max(3, Math.min(30, options.targetCount || 8));
-
-      // Phase 1: 蓝图策划
-      onEvent({
-        type: 'stage_start',
-        stage: 'planning',
-        message: '正在深入分析调研诉求与知识文档，规划全景蓝图与题组块...',
-      });
-
-      const blueprint = await this.stage1PlanBlueprint(docText, options.prompt, targetCount);
-      onEvent({ type: 'blueprint_ready', blueprint });
-
-      db.prepare(`
-        UPDATE ai_generation_sessions
-        SET blueprint_json = ?, status = 'generating', updated_at = ?
-        WHERE id = ?
-      `).run(JSON.stringify(blueprint), new Date().toISOString(), sessionId);
-
-      // Phase 2: 题组块顺次合成 (含极速防死循环守卫)
       onEvent({
         type: 'stage_start',
         stage: 'generating',
-        message: '已锁定架构蓝图，正在以题组块为单位逐项合成题目与跳转逻辑...',
+        message: '正在基于调研诉求自主推演问卷架构与题目流向...',
       });
 
-      const questions = await this.stage2DraftQuestionsAndLogic(
-        blueprint,
-        docText,
-        options.prompt,
-        options.enableJumpLogic !== false,
-        (q, idx, total) => {
-          onEvent({ type: 'question_drafted', question: q, index: idx, total });
-        }
-      );
+      const finalSurvey = await this.generateDirectSurvey(options);
 
-      // 组装最终问卷模型
-      const finalSurvey: QuestionnaireModel = {
-        id: `sur_ai_${sessionId.replace('ses_', '')}`,
-        title: blueprint.title || 'AI 生成专项评估问卷',
-        description: blueprint.description || '基于智能体架构与多题组块流水线自动构建。',
-        questions,
-      };
+      // 下发每道题目就绪事件供流式反馈
+      finalSurvey.questions.forEach((q, idx) => {
+        onEvent({
+          type: 'question_drafted',
+          question: q,
+          index: idx + 1,
+          total: finalSurvey.questions.length,
+        });
+      });
 
       db.prepare(`
         UPDATE ai_generation_sessions SET status = 'completed', updated_at = ? WHERE id = ?
@@ -253,43 +329,31 @@ export class AiGeneratorService {
         messages: [
           {
             role: 'system',
-            content: `你是一位顶级问卷架构师与统计调研专家。
-请根据用户的调研诉求或参考文档，制定严谨的问卷全景蓝图（Blueprint），并将其划分为 3~4 个具有清晰逻辑递进关系的【调研题组块 (blocks)】。
-【组块划分黄金法则】：
-- 组块 1: 身份属性与人群甄别（2~3题，单选为主，用于确认是否属于调研目标受众）；
-- 组块 2: 核心行为习惯与使用场景（2~3题，单选与多选，考察日常偏好与频次）；
-- 组块 3: 满意度与体验量化评估（2~4题，5级李克特量表题，核心指标打分）；
-- 组块 4: 深层痛点与开放建议（1~2题，开放文本填空题与未来改进期望）。
+            content: `你是一位专业调研设计专家。请根据用户的调研诉求生成全景问卷蓝图，并将其自然划分为 2~4 个递进的调研题组块（blocks）。
+你可以根据实际调研场景（如产品体验、满意度、学术调研、考卷诊断、活动反馈等）自由决定各组块的名称、考察维度与题数分配。
 
-必须输出纯 JSON，结构如下：
+必须直接输出纯 JSON，格式如下：
 {
-  "title": "问卷标题（中文）",
-  "description": "问卷背景与填答价值说明（中文，50~100字）",
-  "targetAudience": "目标受众画像（中文）",
+  "title": "问卷标题",
+  "description": "问卷背景与说明（50~100字）",
+  "targetAudience": "目标受众画像",
   "blocks": [
     {
       "id": "b1",
-      "name": "受访者身份与甄别",
-      "description": "甄别核心受众与基础属性",
-      "questionCount": 2,
-      "purpose": "screening"
+      "name": "组块名称",
+      "description": "该组块调研目标",
+      "questionCount": 2
     }
-  ],
-  "variables": [
-    { "name": "v1", "description": "综合满意度得分" }
-  ],
-  "criticalJumpPoints": [
-    { "questionIndex": 1, "purpose": "screening", "description": "身份甄别，筛除非目标人群" }
   ]
 }
-核心准则：
-1. 全文必须使用规范自然的中文。
-2. 所有 blocks 的 questionCount 加总必须精确等于 ${targetCount}。
-3. 每个 block 的 id 严格为 b1, b2, b3... 递增。`,
+
+契约约束：
+1. 所有 blocks 的 questionCount 之和必须精确等于 ${targetCount}。
+2. 每个 block 的 id 严格为 b1, b2, b3... 顺序递增。`,
           },
           {
             role: 'user',
-            content: `用户调研诉求: ${userPrompt || '用户综合体验与满意度调研'}\n目标总题数: ${targetCount}\n参考知识文档摘要:\n${relevantDoc || '（未提供额外文档，请基于专业调研方法论深度推演）'}`,
+            content: `调研诉求: ${userPrompt || '用户综合体验与满意度调研'}\n目标题数: ${targetCount}\n参考资料:\n${relevantDoc || '（无额外参考文档，请基于专业调研方法论自主推演）'}`,
           },
         ],
       });
@@ -330,22 +394,20 @@ export class AiGeneratorService {
       .join('; ');
 
     const jumpInstruction = params.enableJumpLogic !== false
-      ? `逻辑跳转规范：
-- 若为甄别题（如第 1 题），对不符合条件的选项索引（0-indexed 纯数字），设置 "jump": [ { "when": { "q${startIndex}": 0 }, "to": "exit" }, { "else": true, "to": "q${startIndex + 1}" } ]
-- 若跳转到下一题，设置 "to": "qK"（K 必须大于当前题号）；若完成设置 "to": "end"。
-- 普通无跳转题目请完全省略 jump 和 set。`
+      ? `跳转规则（按需生成）：
+- 若题目需要逻辑跳转，在题目中配置 "jump": [ { "when": { "q${startIndex}": 0 }, "to": "exit" } ]
+- when 条件的键为题目 id，值为选项索引（0-based 数字）
+- to 目标可为具体题号（如 "q${startIndex + 2}"）、"end"（正常完成）或 "exit"（提前退出）
+- 普通自然顺次推进的题目完全省略 jump。`
       : `严禁生成任何 jump 或 set 字段。`;
 
     const userPromptContent = [
-      `问卷总体标题: ${params.blueprint.title}`,
-      `总体调研背景: ${params.blueprint.description}`,
-      `目标受众: ${params.blueprint.targetAudience}`,
-      `当前出题题组块: 【${params.block.name}】`,
-      `该组块考察目标: ${params.block.description}`,
-      `该组块必须生成的题目数量: ${count} 题`,
-      `题目编号必须严格从 q${startIndex} 到 q${targetEndIndex}，不可跳跃`,
-      previousSummary ? `前置已确认的题目上下文: ${previousSummary}` : `（这是问卷的第一个题组块）`,
-      params.refinePrompt ? `【用户重点干预修改要求】: ${params.refinePrompt}` : '',
+      `问卷标题: ${params.blueprint.title}`,
+      `总体背景: ${params.blueprint.description}`,
+      `当前出题组块: 【${params.block.name}】（${params.block.description}）`,
+      `必须生成题目数量: ${count} 题（题号必须从 q${startIndex} 到 q${targetEndIndex}）`,
+      previousSummary ? `前序已生成题目: ${previousSummary}` : '',
+      params.refinePrompt ? `用户补充要求: ${params.refinePrompt}` : '',
     ].filter(Boolean).join('\n');
 
     try {
@@ -355,27 +417,25 @@ export class AiGeneratorService {
         messages: [
           {
             role: 'system',
-            content: `你是一位顶级问卷设计师。请根据指定调研题组块的要求，生成符合极简契约的高质量题目列表。
-必须输出纯 JSON，结构如下：
+            content: `你是一位专业问卷设计师。请根据指定调研组块的要求生成题目列表。
+必须直接输出纯 JSON，格式如下：
 {
   "questions": [
     {
       "id": "q${startIndex}",
       "type": "single_choice" | "multiple_choice" | "likert_scale" | "text_input",
-      "title": "题目题干（严谨简练的中文）",
-      "options": ["选项0", "选项1", "选项2"],
+      "title": "题目题干",
+      "options": ["选项0", "选项1"],
       "required": true,
-      "jump": [ { "when": { "q${startIndex}": 0 }, "to": "exit" }, { "else": true, "to": "q${startIndex + 1}" } ]
+      "jump": [ { "when": { "q${startIndex}": 0 }, "to": "exit" } ]
     }
   ]
 }
 
-题型规范：
-1. single_choice、multiple_choice、likert_scale 必须提供 options 字符串数组。
-2. text_input 必须省略 options 并提供 placeholder。
-3. likert_scale 必须提供 5 级规范阶梯（如：["非常不满意", "不满意", "一般", "满意", "非常满意"]）。
-4. 题目题号必须从 q${startIndex} 严格顺序递增至 q${targetEndIndex}。
-5. 选项遵循 MECE 原则，杜绝敷衍空话。
+规范：
+1. id 严格为 q${startIndex} 至 q${targetEndIndex} 顺序递增。
+2. type 仅限：single_choice（单选题）、multiple_choice（多选题）、likert_scale（量表题）、text_input（文本填空题）。
+3. 除 text_input 外必须提供 options 字符串数组；text_input 必须省略 options 并提供 placeholder。
 ${jumpInstruction}`,
           },
           {

@@ -367,9 +367,34 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
   } finally {
     cleanup();
   }
-});
+// ==================== 极简极速直出与组块协同端点 ====================
 
-// ==================== 组块化人机协同端点 (Block-by-Block AI Studio) ====================
+/**
+ * 极简极速直出全卷 (Direct Lean Survey Generation)
+ */
+app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
+  try {
+    const { prompt, documentId, targetCount, enableJumpLogic } = req.body || {};
+    let documentText = '';
+    if (documentId) {
+      const doc = DocumentService.getDocument(documentId);
+      if (doc) documentText = doc.extractedText;
+    }
+
+    const survey = await AiGeneratorService.generateDirectSurvey({
+      prompt: (prompt || '').trim(),
+      documentId,
+      documentText,
+      targetCount: Number(targetCount) || 8,
+      enableJumpLogic: enableJumpLogic !== false,
+    });
+
+    res.json({ success: true, survey });
+  } catch (err: any) {
+    console.error('[API] generate-direct 异常:', err);
+    res.status(500).json({ success: false, error: err?.message || '生成问卷失败' });
+  }
+});
 
 /**
  * 规划全景蓝图与题组块 (Stage 1)
