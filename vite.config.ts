@@ -17,7 +17,7 @@ function getBackendTarget(): string {
   } catch {
     // 容错读取
   }
-  const defaultPort = Number(process.env.PORT) || 3001;
+  const defaultPort = Number(process.env.PORT) || 3125;
   return `http://127.0.0.1:${defaultPort}`;
 }
 
@@ -37,7 +37,7 @@ export default defineConfig({
     open: false,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        target: 'http://127.0.0.1:3125',
         router: () => getBackendTarget(),
         changeOrigin: true,
         timeout: 120000,
@@ -58,7 +58,7 @@ export default defineConfig({
         },
       },
       '^/s/': {
-        target: 'http://127.0.0.1:3001',
+        target: 'http://127.0.0.1:3125',
         router: () => getBackendTarget(),
         changeOrigin: true,
       },

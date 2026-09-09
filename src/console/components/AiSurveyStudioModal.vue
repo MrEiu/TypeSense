@@ -35,6 +35,7 @@ import {
   type DocumentItem,
   type SurveyBlockItem,
   type SurveyBlueprintItem,
+  type LogicTemplateItem,
 } from '../../services/ai-generator-client-service';
 import type { QuestionnaireModel, QuestionItemModel } from '../../schema/questionnaire-schema-types';
 import SurveyFlowCanvas from '../../canvas/components/SurveyFlowCanvas.vue';
@@ -57,6 +58,22 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 const userPrompt = ref('');
 const targetCount = ref(8);
 const enableJumpLogic = ref(true);
+
+// 动态逻辑模板配置 (来自 data/logic-templates，支持多选组合)
+const logicTemplates = ref<LogicTemplateItem[]>([]);
+const selectedTemplateIds = ref<string[]>([]);
+
+const templateOptions = computed(() => {
+  return logicTemplates.value.map((t) => ({
+    label: `${t.name}`,
+    value: t.id,
+  }));
+});
+
+const activeTemplates = computed(() => {
+  if (!selectedTemplateIds.value || selectedTemplateIds.value.length === 0) return [];
+  return logicTemplates.value.filter((t) => selectedTemplateIds.value.includes(t.id));
+});
 
 // 组块化人机协同核心状态
 export interface InteractiveBlock extends SurveyBlockItem {
@@ -152,12 +169,20 @@ async function syncCanvas(): Promise<void> {
   await nextTick();
 }
 
-// 加载文档列表
+// 加载文档与逻辑模板列表
 async function loadDocuments() {
   try {
     documents.value = await AiGeneratorClientService.listDocuments();
   } catch (err) {
     console.error('加载文档列表失败:', err);
+  }
+}
+
+async function loadLogicTemplates() {
+  try {
+    logicTemplates.value = await AiGeneratorClientService.listLogicTemplates();
+  } catch (err) {
+    console.error('加载逻辑模板列表失败:', err);
   }
 }
 
@@ -214,6 +239,7 @@ async function handleDirectGenerate() {
     const survey = await AiGeneratorClientService.generateDirectSurvey({
       prompt: userPrompt.value,
       documentId: selectedDocId.value || undefined,
+      templateIds: selectedTemplateIds.value.length > 0 ? selectedTemplateIds.value : undefined,
       targetCount: targetCount.value,
       enableJumpLogic: enableJumpLogic.value,
     });
@@ -247,6 +273,7 @@ async function handlePlanBlueprint() {
     const result = await AiGeneratorClientService.planBlueprint({
       prompt: userPrompt.value,
       documentId: selectedDocId.value || undefined,
+      templateIds: selectedTemplateIds.value.length > 0 ? selectedTemplateIds.value : undefined,
       targetCount: targetCount.value,
     });
 
@@ -298,6 +325,7 @@ async function handleGenerateSingleBlock(blockIndex: number, customRefine?: stri
       enableJumpLogic: enableJumpLogic.value,
       refinePrompt: customRefine || targetBlock.steerPrompt,
       documentId: selectedDocId.value || undefined,
+      templateIds: selectedTemplateIds.value.length > 0 ? selectedTemplateIds.value : undefined,
     });
 
     targetBlock.questions = generated;
@@ -412,6 +440,7 @@ async function handleFinalizeSurvey() {
 function resetStudioState() {
   userPrompt.value = '';
   selectedDocId.value = null;
+  selectedTemplateIds.value = [];
   directSurvey.value = null;
   isDirectGenerating.value = false;
   blueprint.value = null;
@@ -441,6 +470,7 @@ watch(
   (val) => {
     if (val) {
       loadDocuments();
+      loadLogicTemplates();
       if (persistedInfo.value) {
         resetStudioState();
       }
@@ -456,6 +486,7 @@ watch(
 
 onMounted(() => {
   loadDocuments();
+  loadLogicTemplates();
 });
 </script>
 
@@ -574,10 +605,34 @@ onMounted(() => {
             <NSlider
               v-model:value="targetCount"
               :min="3"
-              :max="24"
+              :max="80"
               :step="1"
               :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
             />
+          </div>
+
+          <!-- 逻辑流转范式模板参考 (动态从 data/logic-templates 发现，支持多选组合) -->
+          <div class="field-item">
+            <div class="label-with-val">
+              <label class="field-label">逻辑流转模板参考 (支持多选)</label>
+              <span v-if="activeTemplates.length > 0" class="val-pill template-pill">已选 {{ activeTemplates.length }} 个</span>
+            </div>
+            <NSelect
+              v-model:value="selectedTemplateIds"
+              multiple
+              :options="templateOptions"
+              placeholder="选择流转拓扑模板 (可多选组合)..."
+              :disabled="isPlanning || isGeneratingChunk || isAutoRunning || isDirectGenerating"
+              size="small"
+              clearable
+              class="sidebar-select"
+            />
+            <div v-if="activeTemplates.length > 0" class="template-hint-list">
+              <div v-for="tpl in activeTemplates" :key="tpl.id" class="template-hint-card">
+                <div class="template-hint-name">{{ tpl.name }}</div>
+                <div class="template-hint-desc">{{ tpl.description }}</div>
+              </div>
+            </div>
           </div>
 
           <div class="field-item switch-row">
@@ -1525,6 +1580,41 @@ onMounted(() => {
   background: rgba(99, 102, 241, 0.2);
   border-color: rgba(99, 102, 241, 0.45);
   color: #fff;
+}
+
+.template-pill {
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+}
+
+.template-hint-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.template-hint-card {
+  padding: 8px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+}
+
+.template-hint-name {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #a5b4fc;
+  margin-bottom: 2px;
+}
+
+.template-hint-desc {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.35;
 }
 
 .anim-spin {

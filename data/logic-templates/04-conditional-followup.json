@@ -1,0 +1,41 @@
+{
+  "id": "conditional_followup",
+  "name": "条件追问模板 (Conditional Follow-up)",
+  "description": "常规回答顺延主流程，特殊或异常选项临时插入追问后回流",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 2 }, "to": "q3" },
+        { "else": true, "to": "q2" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q4"
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q4"
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true
+    }
+  ]
+}

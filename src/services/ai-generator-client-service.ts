@@ -77,11 +77,24 @@ export class AiGeneratorClientService {
   }
 
   /**
+   * 动态获取所有可用的逻辑流转模板 (完全由后端 data/logic-templates 目录动态发现)
+   */
+  public static async listLogicTemplates(): Promise<LogicTemplateItem[]> {
+    const resp = await fetch('/api/ai/logic-templates');
+    if (!resp.ok) {
+      throw new Error(`获取逻辑模板失败 (HTTP ${resp.status})`);
+    }
+    const data = await resp.json();
+    return (data.templates || []) as LogicTemplateItem[];
+  }
+
+  /**
    * 启动四阶流水线并订阅 SSE 流式事件
    */
   public static async startGenerationStream(
     params: {
       documentId?: string;
+      templateIds?: string[];
       prompt: string;
       targetCount: number;
       enableJumpLogic?: boolean;
@@ -135,6 +148,7 @@ export class AiGeneratorClientService {
   public static async generateDirectSurvey(params: {
     prompt: string;
     documentId?: string;
+    templateIds?: string[];
     targetCount: number;
     enableJumpLogic?: boolean;
   }): Promise<QuestionnaireModel> {
@@ -159,6 +173,7 @@ export class AiGeneratorClientService {
   public static async planBlueprint(params: {
     prompt: string;
     documentId?: string;
+    templateIds?: string[];
     targetCount: number;
   }): Promise<SurveyBlueprintItem> {
     const resp = await fetch('/api/ai/plan-blueprint', {
@@ -185,7 +200,8 @@ export class AiGeneratorClientService {
     existingQuestions: QuestionItemModel[];
     enableJumpLogic?: boolean;
     refinePrompt?: string;
-    documentId?: string;
+    documentText?: string;
+    templateIds?: string[];
   }): Promise<QuestionItemModel[]> {
     const resp = await fetch('/api/ai/generate-chunk', {
       method: 'POST',
@@ -232,6 +248,14 @@ export class AiGeneratorClientService {
   }
 }
 
+export interface LogicTemplateItem {
+  id: string;
+  name: string;
+  description: string;
+  filename: string;
+  questions: QuestionItemModel[];
+}
+
 export interface SurveyBlockItem {
   id: string;
   name: string;
@@ -248,4 +272,5 @@ export interface SurveyBlueprintItem {
   blocks: SurveyBlockItem[];
   variables?: Array<{ name: string; description: string }>;
 }
+
 

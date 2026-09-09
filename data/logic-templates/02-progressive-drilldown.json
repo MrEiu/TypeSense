@@ -1,0 +1,50 @@
+{
+  "id": "progressive_drilldown",
+  "name": "分层深入模板 (Progressive Drill-down)",
+  "description": "一级主分类，按选项分流至各自专属子题，最后汇合公共题",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "q3" },
+        { "when": { "q1": 2 }, "to": "q4" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q5",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true
+    }
+  ]
+}

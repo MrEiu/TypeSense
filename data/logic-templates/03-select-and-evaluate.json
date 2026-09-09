@@ -1,0 +1,41 @@
+{
+  "id": "select_and_evaluate",
+  "name": "针对性评价模板 (Select & Evaluate)",
+  "description": "选择主体对象后定向跳转至针对该对象的专属评价题",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "q3" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": "q4"
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": "q4"
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true
+    }
+  ]
+}

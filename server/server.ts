@@ -6,10 +6,10 @@
  */
 
 import http from 'node:http';
-import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -18,11 +18,12 @@ import { ResponseService } from './response-service';
 import { DocumentService } from './document-service';
 import { AiGeneratorService } from './ai-generator-service';
 import { ConfigService } from './config-service';
+import { TemplateService } from './template-service';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT_FILE = path.resolve(__dirname, '../data/server-port.json');
-const DEFAULT_PORT = Number(process.env.PORT) || 3001;
+const DEFAULT_PORT = Number(process.env.PORT) || 3125;
 
 const app = express();
 
@@ -253,13 +254,31 @@ app.delete('/api/documents/:id', (req: Request, res: Response) => {
   }
 });
 
-// ==================== AI 智能问卷生成流式接口 ====================
+// ==================== AI 智能问卷生成与逻辑模板接口 ====================
+
+/**
+ * 获取所有可用的逻辑流转模板 (动态扫描 data/logic-templates 目录)
+ */
+app.get('/api/ai/logic-templates', (_req: Request, res: Response) => {
+  try {
+    const templates = TemplateService.listTemplates();
+    res.json({ success: true, templates });
+  } catch (err: any) {
+    console.error('[API] listTemplates 异常:', err);
+    res.status(500).json({ success: false, error: err?.message || '获取逻辑模板失败' });
+  }
+});
 
 /**
  * SSE 流式生成问卷 (双阶渐进式智能体流水线)
  */
 app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
-  const { documentId, prompt, targetCount, enableJumpLogic } = req.body || {};
+  const { documentId, prompt, targetCount, enableJumpLogic, templateIds, templateId } = req.body || {};
+  const activeTemplateIds = Array.isArray(templateIds)
+    ? templateIds
+    : templateId
+    ? [templateId]
+    : undefined;
 
   // 1. 禁用底层 Socket 超时，启用 TCP Keep-Alive
   req.socket.setTimeout(0);
@@ -329,6 +348,7 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
       {
         documentId,
         documentText,
+        templateIds: activeTemplateIds,
         prompt: userPrompt,
         targetCount: Number(targetCount) || 8,
         enableJumpLogic: enableJumpLogic !== false,
@@ -367,6 +387,8 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
   } finally {
     cleanup();
   }
+});
+
 // ==================== 极简极速直出与组块协同端点 ====================
 
 /**
@@ -374,7 +396,13 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
  */
 app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
   try {
-    const { prompt, documentId, targetCount, enableJumpLogic } = req.body || {};
+    const { prompt, documentId, targetCount, enableJumpLogic, templateIds, templateId } = req.body || {};
+    const activeTemplateIds = Array.isArray(templateIds)
+      ? templateIds
+      : templateId
+      ? [templateId]
+      : undefined;
+
     let documentText = '';
     if (documentId) {
       const doc = DocumentService.getDocument(documentId);
@@ -385,6 +413,7 @@ app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
       prompt: (prompt || '').trim(),
       documentId,
       documentText,
+      templateIds: activeTemplateIds,
       targetCount: Number(targetCount) || 8,
       enableJumpLogic: enableJumpLogic !== false,
     });
@@ -401,7 +430,13 @@ app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
  */
 app.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
   try {
-    const { prompt, documentId, targetCount } = req.body || {};
+    const { prompt, documentId, targetCount, templateIds, templateId } = req.body || {};
+    const activeTemplateIds = Array.isArray(templateIds)
+      ? templateIds
+      : templateId
+      ? [templateId]
+      : undefined;
+
     let documentText = '';
     if (documentId) {
       const doc = DocumentService.getDocument(documentId);
@@ -411,7 +446,8 @@ app.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
     const blueprint = await AiGeneratorService.planBlueprint(
       (prompt || '').trim(),
       documentText,
-      Number(targetCount) || 8
+      Number(targetCount) || 8,
+      activeTemplateIds
     );
 
     res.json({ success: true, blueprint });
@@ -426,11 +462,17 @@ app.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
  */
 app.post('/api/ai/generate-chunk', async (req: Request, res: Response) => {
   try {
-    const { blueprint, block, existingQuestions, enableJumpLogic, refinePrompt, documentId } = req.body || {};
+    const { blueprint, block, existingQuestions, enableJumpLogic, refinePrompt, documentId, templateIds, templateId } = req.body || {};
     if (!blueprint || !block) {
       res.status(400).json({ success: false, error: '缺少 blueprint 或 block 定义' });
       return;
     }
+
+    const activeTemplateIds = Array.isArray(templateIds)
+      ? templateIds
+      : templateId
+      ? [templateId]
+      : undefined;
 
     let documentText = '';
     if (documentId) {
@@ -445,6 +487,7 @@ app.post('/api/ai/generate-chunk', async (req: Request, res: Response) => {
       enableJumpLogic: enableJumpLogic !== false,
       refinePrompt: (refinePrompt || '').trim(),
       documentText,
+      templateIds: activeTemplateIds,
     });
 
     res.json({ success: true, questions, blockId: block.id });
@@ -465,8 +508,10 @@ app.post('/api/ai/finalize-survey', async (req: Request, res: Response) => {
       return;
     }
 
-    // 全局单遍有向图环路阻断
-    const safeQuestions = AiGeneratorService.fastAcyclicGuard(questions);
+    // 全局单遍有向图环路阻断与未引用变量自动清理
+    const safeQuestions = AiGeneratorService.cleanUnusedVariables(
+      AiGeneratorService.fastAcyclicGuard(questions)
+    );
 
     const saved = SurveyService.createSurvey({
       title,
@@ -576,53 +621,110 @@ function saveServerPort(port: number): void {
   }
 }
 
-function findAvailablePort(startPort: number, maxAttempts = 30): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let port = startPort;
-    let attempts = 0;
+/**
+ * 杀死占用指定端口的冲突进程
+ */
+async function killPortProcess(port: number): Promise<boolean> {
+  const isWindows = process.platform === 'win32';
+  let killed = false;
 
-    const testNextPort = () => {
-      if (attempts >= maxAttempts) {
-        reject(new Error(`在端口范围 [${startPort}, ${port}] 内未找到可用端口`));
-        return;
-      }
-      const tester = net.createServer();
-      tester.unref();
+  try {
+    if (isWindows) {
+      // Windows: 通过 netstat 查找监听目标端口的进程 PID
+      const output = execSync('netstat -ano -p tcp', {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      const lines = output.split('\n');
+      const pids = new Set<number>();
 
-      tester.once('error', (err: any) => {
-        if (err.code === 'EADDRINUSE') {
-          attempts++;
-          console.warn(`[TypeSense Backend] 端口 ${port} 已被占用，自动切换探测端口 ${port + 1}...`);
-          port++;
-          setImmediate(testNextPort);
-        } else {
-          reject(err);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split(/\s+/);
+        // TCP 0.0.0.0:3125 ... LISTENING 1234
+        if (parts.length >= 5 && parts[3]?.toUpperCase() === 'LISTENING') {
+          const localAddr = parts[1] || '';
+          if (localAddr.endsWith(`:${port}`)) {
+            const pid = parseInt(parts[parts.length - 1], 10);
+            if (pid && pid > 0 && pid !== process.pid) {
+              pids.add(pid);
+            }
+          }
         }
-      });
+      }
 
-      tester.once('listening', () => {
-        tester.close(() => {
-          resolve(port);
-        });
-      });
+      for (const pid of pids) {
+        try {
+          console.warn(`[TypeSense Backend] 检测到端口 ${port} 被进程 (PID: ${pid}) 占用，正在强制终止释放端口...`);
+          execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+          killed = true;
+          console.info(`[TypeSense Backend] 成功终止冲突进程 (PID: ${pid})`);
+        } catch (e) {
+          console.warn(`[TypeSense Backend] 终止进程 PID ${pid} 失败:`, e);
+        }
+      }
+    } else {
+      // Unix / Linux / macOS
+      const output = execSync(`lsof -ti tcp:${port}`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      }).trim();
+      if (output) {
+        const pids = output
+          .split('\n')
+          .map((p) => parseInt(p.trim(), 10))
+          .filter((p) => p && p !== process.pid);
+        for (const pid of pids) {
+          try {
+            console.warn(`[TypeSense Backend] 检测到端口 ${port} 被进程 (PID: ${pid}) 占用，正在强制终止释放端口...`);
+            process.kill(pid, 'SIGKILL');
+            killed = true;
+            console.info(`[TypeSense Backend] 成功终止冲突进程 (PID: ${pid})`);
+          } catch (e) {
+            console.warn(`[TypeSense Backend] 终止进程 PID ${pid} 失败:`, e);
+          }
+        }
+      }
+    }
+  } catch {
+    // 忽略查询命令异常
+  }
 
-      tester.listen(port, '0.0.0.0');
-    };
+  if (killed) {
+    // 等待操作系统回收 Socket
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
 
-    testNextPort();
-  });
+  return killed;
 }
 
 const server = http.createServer(app);
 
 async function startServer() {
   try {
-    const availablePort = await findAvailablePort(DEFAULT_PORT);
-    server.listen(availablePort, '0.0.0.0', () => {
-      saveServerPort(availablePort);
-      console.info(`[TypeSense Backend] 服务已就绪，正在监听:`);
-      console.info(`  ➜ Local:   http://localhost:${availablePort}/`);
-      console.info(`  ➜ IPv4:    http://127.0.0.1:${availablePort}/`);
+    const targetPort = DEFAULT_PORT;
+    // 启动前若检测到 3125 端口已被占用，自动杀死对应冲突进程
+    await killPortProcess(targetPort);
+
+    server.once('error', async (err: any) => {
+      if (err.code === 'EADDRINUSE') {
+        console.warn(`[TypeSense Backend] 端口 ${targetPort} 检测到冲突 (EADDRINUSE)，正在自动强杀占用进程并重试绑定...`);
+        await killPortProcess(targetPort);
+        setTimeout(() => {
+          server.listen(targetPort, '0.0.0.0');
+        }, 300);
+      } else {
+        console.error('[TypeSense Backend] 服务启动异常:', err);
+        process.exit(1);
+      }
+    });
+
+    server.listen(targetPort, '0.0.0.0', () => {
+      saveServerPort(targetPort);
+      console.info(`[TypeSense Backend] 服务已就绪，固定监听 3125 端口:`);
+      console.info(`  ➜ Local:   http://localhost:${targetPort}/`);
+      console.info(`  ➜ IPv4:    http://127.0.0.1:${targetPort}/`);
       console.info(`  ➜ 端口配置已同步至 data/server-port.json`);
     });
   } catch (err) {

@@ -1,0 +1,43 @@
+{
+  "id": "measure_and_route",
+  "name": "等级分流模板 (Measure & Route)",
+  "description": "通过关键测定题目将受访者划分不同等级，并分流至不同后续路线",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "q3" },
+        { "when": { "q1": 2 }, "to": "q4" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "end"
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "end"
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "end"
+    }
+  ]
+}

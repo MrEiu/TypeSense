@@ -1,0 +1,32 @@
+{
+  "id": "screen_and_route",
+  "name": "筛选分流模板 (Screen & Route)",
+  "description": "入口前置甄别，根据选项分流至主流程或提前结束",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "exit" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true
+    }
+  ]
+}

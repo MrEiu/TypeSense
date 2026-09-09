@@ -21,10 +21,13 @@ import type {
 import { db } from './db';
 import { generateSessionId } from './id-generator';
 import { ConfigService } from './config-service';
+import { TemplateService } from './template-service';
+import { LlmLogger } from './llm-logger';
 
 export interface GenerationOptions {
   documentId?: string;
   documentText?: string;
+  templateIds?: string[];
   prompt: string;
   targetCount: number;
   enableJumpLogic?: boolean;
@@ -44,12 +47,12 @@ export interface SurveyBlueprint {
   targetAudience: string;
   dimensions: SurveyBlockDefinition[];
   blocks: SurveyBlockDefinition[];
-  variables: Array<{
+  variables?: Array<{
     name: string;
     description: string;
     formulaDraft?: string;
   }>;
-  criticalJumpPoints: Array<{
+  criticalJumpPoints?: Array<{
     questionIndex: number;
     purpose: 'screening' | 'branching' | 'scoring';
     description: string;
@@ -76,6 +79,8 @@ export class AiGeneratorService {
     const client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL || undefined,
+      timeout: 180000, // 3 分钟客户端超时，避免大题目量直出时连接过早被切断
+      maxRetries: 2,
     });
 
     return { client, model: config.model };
@@ -88,7 +93,7 @@ export class AiGeneratorService {
    */
   public static async generateDirectSurvey(options: GenerationOptions): Promise<QuestionnaireModel> {
     const ai = this.getOpenAI();
-    const targetCount = Math.max(3, Math.min(30, options.targetCount || 8));
+    const targetCount = Math.max(3, Math.min(80, options.targetCount || 8));
     const docText = options.documentText ? options.documentText.slice(0, 25000) : '';
     const prompt = (options.prompt || '').trim();
     const enableJump = options.enableJumpLogic !== false;
@@ -122,23 +127,32 @@ export class AiGeneratorService {
 2. type 仅限：single_choice（单选题）、multiple_choice（多选题）、likert_scale（量表题）、text_input（填空题）。
 3. 除 text_input 外必须提供 options 字符串数组；text_input 必须省略 options 并可提供 placeholder。
 ${jumpConstraint}
-5. 自由度：根据实际调研场景与目标领域，完全自主决定题型组合、题干用词与题目流向。`;
+5. 变量与流转机制：每道题目的答题结果自动作为变量（以题号如 q1, q2 直接命名与引用），无需额外注册变量。跳转条件可直接根据前序题号判断（如 { "q1": 0 } 或 { "q2": { ">=": 3 } }）。除非确实需要复合数学计算，否则无需生成 set 字段；未被使用的变量注册将在生成后自动清除。
+6. 自由度：根据实际调研场景与目标领域，完全自主决定题型组合、题干用词与题目流向。`;
+
+    const templateContext = TemplateService.formatTemplatesForPrompt(options.templateIds);
 
     const userPrompt = [
       `调研需求：${prompt || '用户综合体验与满意度调研'}`,
       `目标题目数量：${targetCount} 题左右`,
+      templateContext ? `参考逻辑模板与跳转范式：\n${templateContext}\n（请吸收参考上述模板中的跳转拓扑结构构建题目流向）` : '',
       docText ? `参考资料：\n${docText}` : '参考资料：无',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
     try {
-      const response = await ai.client.chat.completions.create({
-        model: ai.model,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      });
+      const response = await LlmLogger.callAndLog(
+        '极速直出全卷 (generateDirectSurvey)',
+        ai,
+        {
+          model: ai.model,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+        },
+        { targetCount, enableJumpLogic: options.enableJumpLogic }
+      );
 
       const raw = response.choices[0]?.message?.content;
       if (!raw) {
@@ -168,8 +182,8 @@ ${jumpConstraint}
         };
       });
 
-      // 毫秒级单遍有向图防环守护
-      const safeQuestions = this.fastAcyclicGuard(sanitizedQuestions);
+      // 毫秒级单遍有向图防环守护与未引用变量自动清理
+      const safeQuestions = this.cleanUnusedVariables(this.fastAcyclicGuard(sanitizedQuestions));
 
       return {
         id: `sur_ai_${generateSessionId().replace('ses_', '')}`,
@@ -305,10 +319,11 @@ ${jumpConstraint}
   public static async planBlueprint(
     prompt: string,
     documentText: string = '',
-    targetCount: number = 8
+    targetCount: number = 8,
+    templateIds?: string[]
   ): Promise<SurveyBlueprint> {
-    const validCount = Math.max(3, Math.min(30, targetCount || 8));
-    return this.stage1PlanBlueprint(documentText, prompt, validCount);
+    const validCount = Math.max(3, Math.min(80, targetCount || 8));
+    return this.stage1PlanBlueprint(documentText, prompt, validCount, templateIds);
   }
 
   /**
@@ -317,19 +332,24 @@ ${jumpConstraint}
   private static async stage1PlanBlueprint(
     docText: string,
     userPrompt: string,
-    targetCount: number
+    targetCount: number,
+    templateIds?: string[]
   ): Promise<SurveyBlueprint> {
     const ai = this.getOpenAI();
     const relevantDoc = docText ? docText.slice(0, 25000) : '';
+    const templateContext = TemplateService.formatTemplatesForPrompt(templateIds);
 
     try {
-      const response = await ai.client.chat.completions.create({
-        model: ai.model,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `你是一位专业调研设计专家。请根据用户的调研诉求生成全景问卷蓝图，并将其自然划分为 2~4 个递进的调研题组块（blocks）。
+      const response = await LlmLogger.callAndLog(
+        'Stage 1 蓝图策划 (stage1PlanBlueprint)',
+        ai,
+        {
+          model: ai.model,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: `你是一位专业调研设计专家。请根据用户的调研诉求生成全景问卷蓝图，并将其自然划分为 2~10 个递进的调研题组块（blocks）。
 你可以根据实际调研场景（如产品体验、满意度、学术调研、考卷诊断、活动反馈等）自由决定各组块的名称、考察维度与题数分配。
 
 必须直接输出纯 JSON，格式如下：
@@ -349,14 +369,22 @@ ${jumpConstraint}
 
 契约约束：
 1. 所有 blocks 的 questionCount 之和必须精确等于 ${targetCount}。
-2. 每个 block 的 id 严格为 b1, b2, b3... 顺序递增。`,
-          },
-          {
-            role: 'user',
-            content: `调研诉求: ${userPrompt || '用户综合体验与满意度调研'}\n目标题数: ${targetCount}\n参考资料:\n${relevantDoc || '（无额外参考文档，请基于专业调研方法论自主推演）'}`,
-          },
-        ],
-      });
+2. 每个 block 的 id 严格为 b1, b2, b3... 顺序递增。
+3. 题目作答结果即为变量，无需在蓝图中规划或预注册全局变量。`,
+            },
+            {
+              role: 'user',
+              content: [
+                `调研诉求: ${userPrompt || '用户综合体验与满意度调研'}`,
+                `目标题数: ${targetCount}`,
+                templateContext ? `参考逻辑模板与拓扑范式:\n${templateContext}\n（请吸收参考上述模板中的结构与分流设计规划各组块）` : '',
+                `参考资料:\n${relevantDoc || '（无额外参考文档，请基于专业调研方法论自主推演）'}`,
+              ].filter(Boolean).join('\n'),
+            },
+          ],
+        },
+        { targetCount, templateIds }
+      );
 
       const raw = response.choices[0]?.message?.content;
       if (!raw) {
@@ -383,11 +411,13 @@ ${jumpConstraint}
     enableJumpLogic?: boolean;
     refinePrompt?: string;
     documentText?: string;
+    templateIds?: string[];
   }): Promise<QuestionItemModel[]> {
     const ai = this.getOpenAI();
     const startIndex = params.existingQuestions.length + 1;
-    const count = Math.max(1, Math.min(10, params.block.questionCount || 2));
+    const count = Math.max(1, Math.min(50, params.block.questionCount || 2));
     const targetEndIndex = startIndex + count - 1;
+    const templateContext = TemplateService.formatTemplatesForPrompt(params.templateIds);
 
     const previousSummary = params.existingQuestions
       .map((q) => `[${q.id}] ${q.title} (${q.type})`)
@@ -407,17 +437,21 @@ ${jumpConstraint}
       `当前出题组块: 【${params.block.name}】（${params.block.description}）`,
       `必须生成题目数量: ${count} 题（题号必须从 q${startIndex} 到 q${targetEndIndex}）`,
       previousSummary ? `前序已生成题目: ${previousSummary}` : '',
+      templateContext ? `参考逻辑模板与跳转范式:\n${templateContext}` : '',
       params.refinePrompt ? `用户补充要求: ${params.refinePrompt}` : '',
     ].filter(Boolean).join('\n');
 
     try {
-      const response = await ai.client.chat.completions.create({
-        model: ai.model,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: `你是一位专业问卷设计师。请根据指定调研组块的要求生成题目列表。
+      const response = await LlmLogger.callAndLog(
+        `Stage 2 组块出题: 【${params.block.name}】`,
+        ai,
+        {
+          model: ai.model,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: `你是一位专业问卷设计师。请根据指定调研组块的要求生成题目列表。
 必须直接输出纯 JSON，格式如下：
 {
   "questions": [
@@ -436,14 +470,17 @@ ${jumpConstraint}
 1. id 严格为 q${startIndex} 至 q${targetEndIndex} 顺序递增。
 2. type 仅限：single_choice（单选题）、multiple_choice（多选题）、likert_scale（量表题）、text_input（文本填空题）。
 3. 除 text_input 外必须提供 options 字符串数组；text_input 必须省略 options 并提供 placeholder。
+4. 变量与流转机制：每道题目的答题结果自动作为变量（以题号如 q1, q2 直接指代），无需额外注册变量。跳转条件可直接根据题号进行判断（如 { "q${startIndex}": 0 } 或 { "q1": { ">=": 3 } }）。无需生成冗余 set 变量注册。
 ${jumpInstruction}`,
-          },
-          {
-            role: 'user',
-            content: userPromptContent,
-          },
-        ],
-      });
+            },
+            {
+              role: 'user',
+              content: userPromptContent,
+            },
+          ],
+        },
+        { blockId: params.block.id, blockName: params.block.name, count }
+      );
 
       const raw = response.choices[0]?.message?.content;
       if (!raw) {
@@ -502,7 +539,8 @@ ${jumpInstruction}`,
       });
     }
 
-    return this.fastAcyclicGuard(allQuestions);
+    const safeQuestions = this.fastAcyclicGuard(allQuestions);
+    return this.cleanUnusedVariables(safeQuestions);
   }
 
   /**
@@ -601,6 +639,80 @@ ${jumpInstruction}`,
     return safeQuestions;
   }
 
+  /**
+   * 自动取消未使用的变量注册 (Clean Unused Variables)
+   * 准则：每道题目的答题结果自身就是变量（直接使用题号 q1, q2... 引用，无需提前注册）。
+   * 若题目中定义了 set 衍生变量，但该变量在所有跳转条件、计算公式、文本插值中均未被引用，则自动剔除注册。
+   */
+  public static cleanUnusedVariables(questions: QuestionItemModel[]): QuestionItemModel[] {
+    const usedIdentifiers = new Set<string>();
+
+    // 1. 扫描所有 jump 条件中引用的变量名 (when 字典的 keys)
+    for (const q of questions) {
+      if (Array.isArray(q.jump)) {
+        for (const rule of q.jump) {
+          if (rule.when && typeof rule.when === 'object') {
+            for (const key of Object.keys(rule.when)) {
+              usedIdentifiers.add(key.trim());
+            }
+          }
+        }
+      }
+    }
+
+    // 2. 扫描所有 set 算式中引用的操作数标识符 (如 "v1 + q2 * 3" 中的 v1, q2)
+    for (const q of questions) {
+      if (q.set && typeof q.set === 'object') {
+        for (const formula of Object.values(q.set)) {
+          if (typeof formula === 'string') {
+            const matches = formula.match(/[a-zA-Z_][a-zA-Z0-9_]*/g);
+            if (matches) {
+              matches.forEach((id) => usedIdentifiers.add(id));
+            }
+          }
+        }
+      }
+    }
+
+    // 3. 扫描所有题干、描述与占位符中的插值变量 (如 {{v1}}, ${v1}, {{q1}})
+    const interpolationRegex = /(?:\{\{|\$\{)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\}\}|\})/g;
+    for (const q of questions) {
+      const texts = [q.title, q.description, q.placeholder].filter(Boolean) as string[];
+      for (const text of texts) {
+        let match: RegExpExecArray | null;
+        while ((match = interpolationRegex.exec(text)) !== null) {
+          if (match[1]) {
+            usedIdentifiers.add(match[1].trim());
+          }
+        }
+      }
+    }
+
+    // 4. 清理每道题目的 set 中未被引用的冗余注册
+    return questions.map((q) => {
+      if (!q.set || typeof q.set !== 'object') {
+        return q;
+      }
+
+      const activeSet: Record<string, string | number> = {};
+      for (const [varName, expr] of Object.entries(q.set)) {
+        // 如果题目企图把自己的题号 set 进变量（如 q1: 0），或者该衍生变量从未被引用，则自动剔除
+        if (usedIdentifiers.has(varName) && varName !== q.id) {
+          activeSet[varName] = expr;
+        }
+      }
+
+      const newQ = { ...q };
+      if (Object.keys(activeSet).length > 0) {
+        newQ.set = activeSet;
+      } else {
+        delete newQ.set;
+      }
+
+      return newQ;
+    });
+  }
+
   private static sanitizeBlueprint(raw: any, targetCount: number): SurveyBlueprint {
     const rawList = Array.isArray(raw.blocks) && raw.blocks.length > 0
       ? raw.blocks
@@ -631,8 +743,8 @@ ${jumpInstruction}`,
       targetAudience: raw.targetAudience || '相关从业人员与目标用户',
       dimensions: blocks,
       blocks,
-      variables: Array.isArray(raw.variables) ? raw.variables : [{ name: 'v1', description: '综合满意度得分' }],
-      criticalJumpPoints: Array.isArray(raw.criticalJumpPoints) ? raw.criticalJumpPoints : [{ questionIndex: 1, purpose: 'screening', description: '身份甄别' }],
+      variables: Array.isArray(raw.variables) ? raw.variables : undefined,
+      criticalJumpPoints: Array.isArray(raw.criticalJumpPoints) ? raw.criticalJumpPoints : undefined,
     };
   }
 }
