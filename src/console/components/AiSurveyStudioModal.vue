@@ -28,6 +28,7 @@ import {
   Compass,
   Check,
   Zap,
+  RotateCcw,
 } from 'lucide-vue-next';
 import {
   AiGeneratorClientService,
@@ -36,7 +37,7 @@ import {
   type SurveyBlueprintItem,
 } from '../../services/ai-generator-client-service';
 import type { QuestionnaireModel, QuestionItemModel } from '../../schema/questionnaire-schema-types';
-import { InfiniteCanvasViewport } from '../../canvas/viewport/infinite-canvas-viewport';
+import SurveyFlowCanvas from '../../canvas/components/SurveyFlowCanvas.vue';
 
 const props = defineProps<{
   show: boolean;
@@ -83,9 +84,13 @@ const refineInstruction = ref('');
 // 发布成果状态
 const persistedInfo = ref<{ surveyId: string; accessUrl: string; canvasUrl: string } | null>(null);
 
-// 无限幕布视口实例与容器
-const canvasContainerRef = ref<HTMLElement | null>(null);
-let canvasViewport: InfiniteCanvasViewport | null = null;
+// 响应式全景问卷领域模型
+const activeSurveyData = computed<QuestionnaireModel>(() => ({
+  id: 'ai_studio_active_dag',
+  title: blueprint.value?.title || 'AI 全景蓝图拓扑幕布',
+  description: blueprint.value?.description || userPrompt.value || '正在动态生成中...',
+  questions: allQuestions.value,
+}));
 
 const activeDoc = computed(() => {
   return documents.value.find((d) => d.id === selectedDocId.value) || null;
@@ -131,28 +136,10 @@ const isAllBlocksCompleted = computed(() => {
 });
 
 /**
- * 极速同步更新无限幕布拓扑
+ * 同步更新拓扑状态
  */
 async function syncCanvas(): Promise<void> {
-  if (!canvasContainerRef.value) return;
-
-  const surveyData: QuestionnaireModel = {
-    id: 'ai_studio_active_dag',
-    title: blueprint.value?.title || 'AI 全景蓝图拓扑幕布',
-    description: blueprint.value?.description || userPrompt.value || '正在动态生成中...',
-    questions: allQuestions.value,
-  };
-
-  if (!canvasViewport) {
-    canvasViewport = new InfiniteCanvasViewport({
-      container: canvasContainerRef.value,
-      questionnaire: surveyData,
-      pendingBlocks: pendingBlocksForCanvas.value,
-    });
-    await canvasViewport.mount();
-  } else {
-    await canvasViewport.updateQuestionnaire(surveyData, pendingBlocksForCanvas.value);
-  }
+  await nextTick();
 }
 
 // 加载文档列表
@@ -370,37 +357,54 @@ async function handleFinalizeSurvey() {
   }
 }
 
-// 监听弹窗显隐生命周期
+/**
+ * 重置工坊全量状态，开启全新智造
+ */
+function resetStudioState() {
+  userPrompt.value = '';
+  selectedDocId.value = null;
+  blueprint.value = null;
+  blocks.value = [];
+  currentBlockIndex.value = 0;
+  isPlanning.value = false;
+  isGeneratingChunk.value = false;
+  isAutoRunning.value = false;
+  shouldPauseAuto.value = false;
+  statusMessage.value = '';
+  errorMessage.value = null;
+  showInterventionInput.value = false;
+  refineInstruction.value = '';
+  persistedInfo.value = null;
+}
+
+function handleCloseModal() {
+  if (persistedInfo.value) {
+    resetStudioState();
+  }
+  emit('update:show', false);
+}
+
+// 监听弹窗显隐生命周期：如果上次已完成入库，关闭或再次打开时自动重置为全新状态
 watch(
   () => props.show,
   (val) => {
     if (val) {
-      nextTick(() => {
-        loadDocuments();
-        if (blueprint.value) {
-          syncCanvas();
-        }
-      });
-    } else {
-      if (canvasViewport) {
-        canvasViewport.destroy();
-        canvasViewport = null;
+      loadDocuments();
+      if (persistedInfo.value) {
+        resetStudioState();
       }
+    } else {
       isAutoRunning.value = false;
       shouldPauseAuto.value = true;
+      if (persistedInfo.value) {
+        resetStudioState();
+      }
     }
   }
 );
 
 onMounted(() => {
   loadDocuments();
-});
-
-onUnmounted(() => {
-  if (canvasViewport) {
-    canvasViewport.destroy();
-    canvasViewport = null;
-  }
 });
 </script>
 
@@ -427,6 +431,19 @@ onUnmounted(() => {
           <span class="modal-subtitle">
             基于工业级极简契约，以多题组块为单元动态生成，在自组织无限幕布上实时裂变呈现有向图拓扑。
           </span>
+        </div>
+
+        <div v-if="blueprint || userPrompt" class="header-extra-actions">
+          <button
+            type="button"
+            class="header-reset-btn"
+            title="清空当前问卷草稿，开启新问卷"
+            :disabled="isPlanning || isGeneratingChunk || isAutoRunning"
+            @click="resetStudioState"
+          >
+            <RotateCcw :size="13" />
+            <span>开启新智造</span>
+          </button>
         </div>
       </div>
     </template>
@@ -567,16 +584,22 @@ onUnmounted(() => {
 
       <!-- 右侧主视界：自组织无限幕布原生容器与悬浮控制舱 -->
       <main class="right-canvas-stage">
-        <!-- 核心视口：完全挂载 InfiniteCanvasViewport -->
-        <div ref="canvasContainerRef" class="studio-infinite-canvas-host">
-          <!-- 当尚未规划蓝图时的引导遮罩 -->
-          <div v-if="!blueprint" class="canvas-empty-guide">
-            <div class="guide-sparkle-circle">
-              <Compass :size="38" />
-            </div>
-            <h3>自组织无限幕布待命中</h3>
-            <p>在左侧输入调研诉求并点击「规划全景架构」，AI 将在无限幕布上秒级绘制出有向图拓扑骨架与递进题组块。</p>
+        <!-- 当尚未规划蓝图时的引导遮罩 -->
+        <div v-if="!blueprint" class="canvas-empty-guide">
+          <div class="guide-sparkle-circle">
+            <Compass :size="38" />
           </div>
+          <h3>自组织无限幕布待命中</h3>
+          <p>在左侧输入调研诉求并点击「规划全景架构」，AI 将在无限幕布上秒级绘制出有向图拓扑骨架与递进题组块。</p>
+        </div>
+
+        <!-- 核心视口：基于 Vue Flow 的全景响应式画布 -->
+        <div v-show="blueprint" class="studio-infinite-canvas-host">
+          <SurveyFlowCanvas
+            v-if="blueprint"
+            :questionnaire="activeSurveyData"
+            :pending-blocks="pendingBlocksForCanvas"
+          />
         </div>
 
         <!-- 顶部悬浮控制舱 (Floating Agent Cockpit) -->
@@ -695,8 +718,12 @@ onUnmounted(() => {
               <a :href="persistedInfo.canvasUrl" target="_blank" class="link-btn secondary-link">
                 <span>📐 进入正式管理幕布</span>
               </a>
-              <button type="button" class="link-btn ghost-link" @click="emit('update:show', false)">
-                <span>关闭窗口</span>
+              <button type="button" class="link-btn accent-link" @click="resetStudioState">
+                <Sparkles :size="15" />
+                <span>✨ 开启下一份全新问卷</span>
+              </button>
+              <button type="button" class="link-btn ghost-link" @click="handleCloseModal">
+                <span>完成并关闭</span>
               </button>
             </div>
           </div>
@@ -1335,6 +1362,42 @@ onUnmounted(() => {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #94a3b8;
+}
+
+.accent-link {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25));
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  color: #e9d5ff;
+}
+
+.accent-link:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.4), rgba(168, 85, 247, 0.4));
+  color: #fff;
+}
+
+.header-extra-actions {
+  margin-left: auto;
+}
+
+.header-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.header-reset-btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.45);
+  color: #fff;
 }
 
 .anim-spin {

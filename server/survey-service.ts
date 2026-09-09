@@ -184,11 +184,10 @@ export class SurveyService {
    */
   public static initSeedSurveys(): void {
     const surveysDir = path.resolve(__dirname, '../public/data/surveys');
-    if (!fs.existsSync(surveysDir)) return;
+    if (fs.existsSync(surveysDir)) {
+      const files = fs.readdirSync(surveysDir).filter((f) => f.endsWith('.json') && f !== 'manifest.json');
 
-    const files = fs.readdirSync(surveysDir).filter((f) => f.endsWith('.json') && f !== 'manifest.json');
-
-    files.forEach((file) => {
+      files.forEach((file) => {
       try {
         const filePath = path.join(surveysDir, file);
         const content = fs.readFileSync(filePath, 'utf-8');
@@ -245,5 +244,83 @@ export class SurveyService {
         console.error(`[SurveyService] 导入种子问卷 ${file} 失败:`, err);
       }
     });
+  }
+
+    // 确保库中至少拥有一份开箱即用的默认示范问卷 (survey_tech_2026)
+    const seedSlug = 'survey_tech_2026';
+    const existingSeed = db.prepare(`SELECT id FROM surveys WHERE slug = ? OR id = ?`).get(seedSlug, seedSlug);
+    if (!existingSeed) {
+      const defaultSeed = {
+        id: seedSlug,
+        title: '2026 开发者效能与工程体验调查',
+        description: '本问卷旨在了解您在日常研发实践中的真实感受，支持有向图拓扑跳转与自组织排版。',
+        questions: [
+          {
+            id: 'q1',
+            type: 'single_choice',
+            title: '您目前主要负责的研发角色是什么？',
+            required: true,
+            options: ['前端开发', '后端开发', '全栈开发', 'AI / 算法工程师', '技术主管 / 架构师'],
+            jump: [
+              { when: { q1: 0 }, to: 'q2' },
+              { when: { q1: 1 }, to: 'q3' },
+              { else: true, to: 'q2' },
+            ],
+          },
+          {
+            id: 'q2',
+            type: 'multiple_choice',
+            title: '您在日常项目中经常使用的开发工具与实践有哪些？',
+            required: true,
+            options: [
+              'TypeScript 静态类型约束',
+              'CI/CD 自动化流水线',
+              'AI 辅助编程与代码生成',
+              '模块化与清晰目录边界',
+              '自动化单元测试',
+            ],
+          },
+          {
+            id: 'q3',
+            type: 'likert_scale',
+            title: '您对“AI 工具显著提升了日常开发交付效率”的认同程度：',
+            required: true,
+            options: ['强烈不赞同', '不太赞同', '中立', '基本赞同', '非常赞同'],
+          },
+          {
+            id: 'q4',
+            type: 'likert_scale',
+            title: '您对当前团队代码架构规范与维护性的满意度：',
+            required: true,
+            options: ['非常不满意', '不满意', '一般', '满意', '非常满意'],
+          },
+          {
+            id: 'q5',
+            type: 'text_input',
+            title: '您对提升团队研发体验有何具体建议或想法？',
+            required: false,
+            placeholder: '请输入您的建议或想法...',
+          },
+        ],
+      };
+      const now = new Date().toISOString();
+      db.prepare(`
+        INSERT INTO surveys (id, slug, title, description, schema_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        seedSlug,
+        seedSlug,
+        defaultSeed.title,
+        defaultSeed.description,
+        JSON.stringify(defaultSeed, null, 2),
+        now,
+        now
+      );
+      db.prepare(`
+        INSERT INTO survey_links (code, survey_id, created_at)
+        VALUES (?, ?, ?)
+      `).run('tech2026', seedSlug, now);
+      console.info(`[SurveyService] 默认示范问卷 [${seedSlug}] 已导入数据库。`);
+    }
   }
 }
