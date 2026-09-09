@@ -40,6 +40,9 @@ export function renderCanvasNodeCardElement(node: LayoutedNodeItem): HTMLElement
   } else if (node.type === 'logic_node') {
     badge.textContent = `⚡ 流程控制 · ${node.logicType?.toUpperCase() || 'LOGIC'}`;
     badge.classList.add('badge-logic');
+  } else if (node.type === 'block_skeleton_node') {
+    badge.textContent = '✨ 待生成组块';
+    badge.classList.add('badge-skeleton');
   } else {
     badge.textContent = `Q${node.seqNumber || 0} · ${getQuestionTypeLabel(node.questionModel?.type)}`;
   }
@@ -69,6 +72,13 @@ export function renderCanvasNodeCardElement(node: LayoutedNodeItem): HTMLElement
       <div class="canvas-node-meta-box">
         <div>⚡ 模式：自组织分层拓扑 (ELK)</div>
         <div>📐 坐标：动态算法推导计算</div>
+      </div>
+    `;
+  } else if (node.type === 'block_skeleton_node') {
+    body.innerHTML = `
+      <div class="skeleton-placeholder-box">
+        <div class="skeleton-pulse-dot"></div>
+        <span>AI 智能体规划分面 · 推进出题时将在此裂变展开</span>
       </div>
     `;
   } else if (node.type === 'end_node') {

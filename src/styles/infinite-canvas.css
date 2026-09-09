@@ -409,3 +409,48 @@
   font-style: italic;
 }
 
+/* 待生成组块骨架节点 (AI 智造) */
+.node-type-block_skeleton_node {
+  border: 1.5px dashed rgba(99, 102, 241, 0.45);
+  background: rgba(15, 23, 42, 0.82);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.node-type-block_skeleton_node:hover {
+  border-color: #818cf8;
+  box-shadow: 0 6px 28px rgba(99, 102, 241, 0.2);
+}
+
+.badge-skeleton {
+  background: rgba(139, 92, 246, 0.2) !important;
+  color: #c4b5fd !important;
+  border: 1px solid rgba(139, 92, 246, 0.4) !important;
+}
+
+.skeleton-placeholder-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+.skeleton-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #818cf8;
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.3; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+
+

@@ -5,6 +5,11 @@
  * 职责：提供 REST API（问卷 CRUD、答卷存盘）以及短链重定向网关，持久化依托原生 SQLite。
  */
 
+import http from 'node:http';
+import net from 'node:net';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -14,8 +19,12 @@ import { DocumentService } from './document-service';
 import { AiGeneratorService } from './ai-generator-service';
 import { ConfigService } from './config-service';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PORT_FILE = path.resolve(__dirname, '../data/server-port.json');
+const DEFAULT_PORT = Number(process.env.PORT) || 3001;
+
 const app = express();
-const PORT = 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -247,19 +256,53 @@ app.delete('/api/documents/:id', (req: Request, res: Response) => {
 // ==================== AI 智能问卷生成流式接口 ====================
 
 /**
- * SSE 流式生成问卷 (四阶渐进式流水线)
+ * SSE 流式生成问卷 (双阶渐进式智能体流水线)
  */
 app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
   const { documentId, prompt, targetCount, enableJumpLogic } = req.body || {};
 
-  // 设置 SSE 响应头
+  // 1. 禁用底层 Socket 超时，启用 TCP Keep-Alive
+  req.socket.setTimeout(0);
+  req.socket.setKeepAlive(true);
+
+  // 2. 设置标准 SSE 响应头，禁用代理缓冲
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders?.();
 
+  let isClosed = false;
+
+  // 3. 定时心跳保活机制 (每 3 秒发送一次 SSE 注释帧，彻底消除 ECONNRESET)
+  const heartbeatTimer = setInterval(() => {
+    if (isClosed || res.writableEnded) return;
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      cleanup();
+    }
+  }, 3000);
+
+  const cleanup = () => {
+    if (!isClosed) {
+      isClosed = true;
+      clearInterval(heartbeatTimer);
+    }
+  };
+
+  req.on('close', cleanup);
+  res.on('finish', cleanup);
+  res.on('error', cleanup);
+
   const sendEvent = (event: any) => {
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    if (isClosed || res.writableEnded) return;
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch (err) {
+      console.warn('[SSE] 写入数据异常:', err);
+      cleanup();
+    }
   };
 
   try {
@@ -271,11 +314,22 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
       }
     }
 
+    const userPrompt = (prompt || '').trim();
+    if (!userPrompt && !documentText) {
+      sendEvent({ type: 'error', error: '请提供问卷调研诉求或选择知识库文档' });
+      if (!res.writableEnded) {
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
+      cleanup();
+      return;
+    }
+
     const generatedSurvey = await AiGeneratorService.executePipeline(
       {
         documentId,
         documentText,
-        prompt: prompt || '全面评估团队在业务开发、架构稳定性与工具链落地中的真实实践',
+        prompt: userPrompt,
         targetCount: Number(targetCount) || 8,
         enableJumpLogic: enableJumpLogic !== false,
       },
@@ -299,12 +353,118 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
       canvasUrl: `/admin.html?id=${saved.id}`,
     });
 
-    res.write('data: [DONE]\n\n');
-    res.end();
+    if (!res.writableEnded) {
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
   } catch (err: any) {
+    console.error('[API] generate-stream 异常:', err);
     sendEvent({ type: 'error', error: err?.message || '生成失败' });
-    res.write('data: [DONE]\n\n');
-    res.end();
+    if (!res.writableEnded) {
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+// ==================== 组块化人机协同端点 (Block-by-Block AI Studio) ====================
+
+/**
+ * 规划全景蓝图与题组块 (Stage 1)
+ */
+app.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
+  try {
+    const { prompt, documentId, targetCount } = req.body || {};
+    let documentText = '';
+    if (documentId) {
+      const doc = DocumentService.getDocument(documentId);
+      if (doc) documentText = doc.extractedText;
+    }
+
+    const blueprint = await AiGeneratorService.planBlueprint(
+      (prompt || '').trim(),
+      documentText,
+      Number(targetCount) || 8
+    );
+
+    res.json({ success: true, blueprint });
+  } catch (err: any) {
+    console.error('[API] plan-blueprint 异常:', err);
+    res.status(500).json({ success: false, error: err?.message || '规划全景蓝图失败' });
+  }
+});
+
+/**
+ * 单组块题目生成 (Stage 2 单步出题与重拟)
+ */
+app.post('/api/ai/generate-chunk', async (req: Request, res: Response) => {
+  try {
+    const { blueprint, block, existingQuestions, enableJumpLogic, refinePrompt, documentId } = req.body || {};
+    if (!blueprint || !block) {
+      res.status(400).json({ success: false, error: '缺少 blueprint 或 block 定义' });
+      return;
+    }
+
+    let documentText = '';
+    if (documentId) {
+      const doc = DocumentService.getDocument(documentId);
+      if (doc) documentText = doc.extractedText;
+    }
+
+    const questions = await AiGeneratorService.generateBlockQuestions({
+      blueprint,
+      block,
+      existingQuestions: Array.isArray(existingQuestions) ? existingQuestions : [],
+      enableJumpLogic: enableJumpLogic !== false,
+      refinePrompt: (refinePrompt || '').trim(),
+      documentText,
+    });
+
+    res.json({ success: true, questions, blockId: block.id });
+  } catch (err: any) {
+    console.error('[API] generate-chunk 异常:', err);
+    res.status(500).json({ success: false, error: err?.message || '生成组块题目失败' });
+  }
+});
+
+/**
+ * 全卷组装、有向图防环校验并持久化入库
+ */
+app.post('/api/ai/finalize-survey', async (req: Request, res: Response) => {
+  try {
+    const { title, description, questions, slug } = req.body || {};
+    if (!title || !Array.isArray(questions) || questions.length === 0) {
+      res.status(400).json({ success: false, error: '问卷标题与题目列表不能为空' });
+      return;
+    }
+
+    // 全局单遍有向图环路阻断
+    const safeQuestions = AiGeneratorService.fastAcyclicGuard(questions);
+
+    const saved = SurveyService.createSurvey({
+      title,
+      description: description || '基于 AI 智能体组块协同工坊生成。',
+      slug,
+      schema: {
+        title,
+        description: description || '',
+        questions: safeQuestions,
+      },
+    });
+
+    res.json({
+      success: true,
+      surveyId: saved.id,
+      slug: saved.slug,
+      accessUrl: `/survey.html?id=${saved.id}`,
+      canvasUrl: `/admin.html?id=${saved.id}`,
+      questions: safeQuestions,
+    });
+  } catch (err: any) {
+    console.error('[API] finalize-survey 异常:', err);
+    res.status(500).json({ success: false, error: err?.message || '持久化问卷失败' });
   }
 });
 
@@ -378,8 +538,74 @@ app.post('/api/ai/models', async (req: Request, res: Response) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.info(`[TypeSense Backend] 服务已启动，监听在 http://localhost:${PORT}`);
-});
+function saveServerPort(port: number): void {
+  try {
+    const dir = path.dirname(PORT_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      PORT_FILE,
+      JSON.stringify({ port, updatedAt: new Date().toISOString() }, null, 2)
+    );
+  } catch (err) {
+    console.warn('[TypeSense Backend] 保存 server-port.json 异常:', err);
+  }
+}
+
+function findAvailablePort(startPort: number, maxAttempts = 30): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let port = startPort;
+    let attempts = 0;
+
+    const testNextPort = () => {
+      if (attempts >= maxAttempts) {
+        reject(new Error(`在端口范围 [${startPort}, ${port}] 内未找到可用端口`));
+        return;
+      }
+      const tester = net.createServer();
+      tester.unref();
+
+      tester.once('error', (err: any) => {
+        if (err.code === 'EADDRINUSE') {
+          attempts++;
+          console.warn(`[TypeSense Backend] 端口 ${port} 已被占用，自动切换探测端口 ${port + 1}...`);
+          port++;
+          setImmediate(testNextPort);
+        } else {
+          reject(err);
+        }
+      });
+
+      tester.once('listening', () => {
+        tester.close(() => {
+          resolve(port);
+        });
+      });
+
+      tester.listen(port, '0.0.0.0');
+    };
+
+    testNextPort();
+  });
+}
+
+const server = http.createServer(app);
+
+async function startServer() {
+  try {
+    const availablePort = await findAvailablePort(DEFAULT_PORT);
+    server.listen(availablePort, '0.0.0.0', () => {
+      saveServerPort(availablePort);
+      console.info(`[TypeSense Backend] 服务已就绪，正在监听:`);
+      console.info(`  ➜ Local:   http://localhost:${availablePort}/`);
+      console.info(`  ➜ IPv4:    http://127.0.0.1:${availablePort}/`);
+      console.info(`  ➜ 端口配置已同步至 data/server-port.json`);
+    });
+  } catch (err) {
+    console.error('[TypeSense Backend] 服务启动失败:', err);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 

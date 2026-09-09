@@ -9,7 +9,7 @@
 import Panzoom from '@panzoom/panzoom';
 import type { PanzoomObject } from '@panzoom/panzoom';
 import type { QuestionnaireModel } from '../../schema/questionnaire-schema-types';
-import { QuestionnaireGraphTransformer } from '../services/questionnaire-graph-transformer';
+import { QuestionnaireGraphTransformer, type PendingBlockInfo } from '../services/questionnaire-graph-transformer';
 import { CanvasLayoutEngine } from '../services/canvas-layout-engine';
 import { renderCanvasNodeCardElement } from '../components/canvas-node-card-element';
 import { renderCanvasConnectionLineSvg } from '../components/canvas-connection-line-element';
@@ -17,11 +17,13 @@ import { renderCanvasConnectionLineSvg } from '../components/canvas-connection-l
 export interface InfiniteCanvasViewportOptions {
   container: HTMLElement;
   questionnaire: QuestionnaireModel;
+  pendingBlocks?: PendingBlockInfo[];
 }
 
 export class InfiniteCanvasViewport {
   private container: HTMLElement;
   private questionnaire: QuestionnaireModel;
+  private pendingBlocks?: PendingBlockInfo[];
   private panzoomInstance: PanzoomObject | null = null;
   private planeElement!: HTMLElement;
   private layoutEngine: CanvasLayoutEngine;
@@ -31,6 +33,7 @@ export class InfiniteCanvasViewport {
   constructor(options: InfiniteCanvasViewportOptions) {
     this.container = options.container;
     this.questionnaire = options.questionnaire;
+    this.pendingBlocks = options.pendingBlocks;
     this.layoutEngine = new CanvasLayoutEngine();
   }
 
@@ -59,7 +62,7 @@ export class InfiniteCanvasViewport {
     this.initPanzoom(viewport);
 
     // 5. 计算自组织排版并渲染图元素
-    await this.renderGraphLayout();
+    await this.renderGraphLayout(this.pendingBlocks);
   }
 
   /**
@@ -73,9 +76,25 @@ export class InfiniteCanvasViewport {
   }
 
   /**
+   * 动态更新问卷数据与待生成组块，并重新计算排版
+   */
+  public async updateQuestionnaire(
+    newQuestionnaire: QuestionnaireModel,
+    pendingBlocks?: PendingBlockInfo[]
+  ): Promise<void> {
+    this.questionnaire = newQuestionnaire;
+    this.pendingBlocks = pendingBlocks;
+    await this.renderGraphLayout(pendingBlocks);
+  }
+
+  /**
    * 计算自组织排版并渲染全部节点与连线
    */
-  public async renderGraphLayout(): Promise<void> {
+  public async renderGraphLayout(pendingBlocks?: PendingBlockInfo[]): Promise<void> {
+    if (pendingBlocks !== undefined) {
+      this.pendingBlocks = pendingBlocks;
+    }
+
     this.planeElement.innerHTML = `
       <div class="canvas-loading-indicator">
         <div class="canvas-spinner"></div>
@@ -85,7 +104,7 @@ export class InfiniteCanvasViewport {
 
     try {
       // 1. 转换为抽象图
-      const graphModel = QuestionnaireGraphTransformer.transformToGraph(this.questionnaire);
+      const graphModel = QuestionnaireGraphTransformer.transformToGraph(this.questionnaire, this.pendingBlocks);
 
       // 2. 运行 ELK 算法计算几何
       const layoutedGraph = await this.layoutEngine.computeLayout(graphModel, {
