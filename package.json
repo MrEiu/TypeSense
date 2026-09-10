@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx scripts/dev.ts",
-    "dev:client": "vite",
-    "server": "tsx watch server/server.ts",
+    "dev:client": "vite --host 0.0.0.0",
+    "server": "tsx --no-warnings watch server/server.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "bump": "tsx scripts/bump-version.ts",

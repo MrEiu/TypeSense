@@ -21,8 +21,21 @@ function getBackendTarget(): string {
   return `http://127.0.0.1:${defaultPort}`;
 }
 
+function cleanUrlsPlugin() {
+  return {
+    name: 'typesense-clean-urls',
+    configureServer(server: any) {
+      server.printUrls = () => {
+        const port = server.config?.server?.port || 5173;
+        console.info(`  \x1b[32m➜\x1b[0m  \x1b[1mLocal\x1b[0m:   \x1b[36mhttp://localhost:${port}/\x1b[0m`);
+        console.info(`  \x1b[32m➜\x1b[0m  \x1b[1mNetwork\x1b[0m: \x1b[36mhttp://0.0.0.0:${port}/\x1b[0m`);
+      };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), cleanUrlsPlugin()],
   build: {
     rollupOptions: {
       input: {

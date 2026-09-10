@@ -40,22 +40,20 @@ process.on('exit', () => {
   }
 });
 
-console.info('\x1b[36m%s\x1b[0m', '================================================');
-console.info('\x1b[36m%s\x1b[0m', '  🚀 TypeSense 全栈开发环境一键启动中...');
-console.info('\x1b[36m%s\x1b[0m', '  - 后端 API 服务: tsx watch server/server.ts (Port: 3125)');
-console.info('\x1b[36m%s\x1b[0m', '  - 前端开发页面: vite (Port: 5173)');
-console.info('\x1b[36m%s\x1b[0m', '================================================\n');
+
 
 // 1. 启动后端
-const backend = spawn(npxCmd, ['tsx', 'watch', 'server/server.ts'], {
+const backendCmd = isWindows ? 'npx.cmd tsx --no-warnings watch server/server.ts' : 'npx tsx --no-warnings watch server/server.ts';
+const backend = spawn(backendCmd, {
   stdio: 'inherit',
   shell: true,
-  env: process.env,
+  env: { ...process.env, NODE_NO_WARNINGS: '1' },
 });
 children.push(backend);
 
 // 2. 启动前端 Vite
-const frontend = spawn(npxCmd, ['vite'], {
+const frontendCmd = isWindows ? 'npx.cmd vite --host 0.0.0.0' : 'npx vite --host 0.0.0.0';
+const frontend = spawn(frontendCmd, {
   stdio: 'inherit',
   shell: true,
   env: process.env,

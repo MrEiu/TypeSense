@@ -9,6 +9,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+process.removeAllListeners('warning');
 import { execSync } from 'node:child_process';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
@@ -766,8 +768,6 @@ async function startServer() {
 
     server.listen(targetPort, '127.0.0.1', () => {
       saveServerPort(targetPort);
-      console.info(`[TypeSense Backend] 服务已就绪 (本地代理端口: ${targetPort})`);
-      console.info(`  ➜ 端口配置已同步至 data/server-port.json`);
     });
   } catch (err) {
     console.error('[TypeSense Backend] 服务启动失败:', err);
