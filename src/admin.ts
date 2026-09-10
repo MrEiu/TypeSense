@@ -1,8 +1,8 @@
 /**
  * admin.ts
  *
- * 管理端流程拓扑幕布主入口 (admin.html)
- * 职责：挂载 AdminCanvasApp Vue 3 应用，渲染基于 Vue Flow 的全景问卷有向图拓扑。
+ * TypeSense Studio 问卷逻辑与智能编排工作台主入口 (admin.html)
+ * 职责：挂载 AdminCanvasApp Vue 3 应用，支持大纲编辑、Jump 条件配置、流程拓扑与即时真机模拟。
  */
 
 import { createApp } from 'vue';

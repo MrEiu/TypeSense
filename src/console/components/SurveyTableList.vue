@@ -113,19 +113,18 @@ const tableColumns: DataTableColumns<SurveyMetadataItem> = [
   {
     title: '操作',
     key: 'actions',
-    width: 240,
+    width: 250,
     render(row) {
       return h(NSpace, { size: 6 }, () => [
         h(
           NButton,
           {
             size: 'tiny',
+            secondary: true,
             type: 'primary',
-            tag: 'a',
-            href: `/survey.html?id=${encodeURIComponent(row.slug || row.id)}`,
-            target: '_blank',
+            onClick: () => emit('open-detail', row),
           },
-          { default: () => '作答' }
+          { default: () => '发布' }
         ),
         h(
           NButton,
@@ -142,9 +141,24 @@ const tableColumns: DataTableColumns<SurveyMetadataItem> = [
           {
             size: 'tiny',
             secondary: true,
-            onClick: () => emit('open-detail', row),
+            type: 'success',
+            tag: 'a',
+            href: `/survey.html?id=${encodeURIComponent(row.slug || row.id)}`,
+            target: '_blank',
           },
-          { default: () => '分发链接' }
+          { default: () => '体验' }
+        ),
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            secondary: true,
+            type: 'warning',
+            tag: 'a',
+            href: `/admin.html?id=${encodeURIComponent(row.slug || row.id)}`,
+            target: '_blank',
+          },
+          { default: () => '编排' }
         ),
         h(
           NPopconfirm,

@@ -89,6 +89,28 @@ app.post('/api/surveys', (req: Request, res: Response) => {
 });
 
 /**
+ * 更新问卷定义与题目 Schema (工作台编辑保存)
+ */
+app.put('/api/surveys/:id', (req: Request, res: Response) => {
+  try {
+    const { title, description, schema } = req.body || {};
+    const success = SurveyService.updateSurvey(req.params.id, {
+      title,
+      description,
+      schema: schema || req.body,
+    });
+    if (!success) {
+      res.status(404).json({ error: '问卷不存在或更新失败' });
+      return;
+    }
+    res.json({ success, message: '问卷已成功保存更新' });
+  } catch (err) {
+    console.error('[API] updateSurvey 异常:', err);
+    res.status(500).json({ error: '更新问卷失败' });
+  }
+});
+
+/**
  * 删除指定问卷
  */
 app.delete('/api/surveys/:id', (req: Request, res: Response) => {

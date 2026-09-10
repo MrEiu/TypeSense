@@ -97,11 +97,6 @@ const menuOptions: MenuOption[] = [
     icon: renderIcon(FileQuestion),
   },
   {
-    label: '全量作答数据',
-    key: 'analytics',
-    icon: renderIcon(BarChart3),
-  },
-  {
     label: 'AI 智造工坊',
     key: 'ai_studio',
     icon: renderIcon(Sparkles),
@@ -181,10 +176,6 @@ function handleMenuSelect(key: string) {
   activeMenuKey.value = key;
   if (key === 'ai_studio') {
     isAiStudioOpen.value = true;
-  } else if (key === 'analytics') {
-    if (surveys.value.length > 0) {
-      openResponsesDrawer(surveys.value[0]);
-    }
   }
 }
 

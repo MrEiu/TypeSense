@@ -129,6 +129,33 @@ export class QuestionnaireRepositoryService {
   }
 
   /**
+   * 向后端更新问卷定义 (工作台编辑保存)
+   */
+  public static async updateSurvey(
+    idOrSlug: string,
+    survey: QuestionnaireModel
+  ): Promise<boolean> {
+    const validated = QuestionnaireLoaderService.validateAndNormalize(survey);
+
+    try {
+      const resp = await fetch(`/api/surveys/${encodeURIComponent(idOrSlug)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: validated.title,
+          description: validated.description,
+          schema: validated,
+        }),
+      });
+
+      return resp.ok;
+    } catch (err) {
+      console.error('[RepositoryService] 更新问卷失败:', err);
+      return false;
+    }
+  }
+
+  /**
    * 从后端删除问卷
    */
   public static async deleteSurvey(idOrSlug: string): Promise<boolean> {

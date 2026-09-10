@@ -136,6 +136,53 @@ export class SurveyService {
   }
 
   /**
+   * 更新已有问卷内容 (Schema, 题目, 标题, 描述)
+   */
+  public static updateSurvey(
+    idOrSlug: string,
+    data: {
+      title?: string;
+      description?: string;
+      schema: Record<string, unknown>;
+    }
+  ): boolean {
+    const row = db.prepare(`
+      SELECT id, slug, schema_json FROM surveys 
+      WHERE id = ? OR slug = ?
+      LIMIT 1
+    `).get(idOrSlug, idOrSlug) as { id: string; slug: string; schema_json: string } | undefined;
+
+    if (!row) return false;
+
+    try {
+      const now = new Date().toISOString();
+      const existingParsed = JSON.parse(row.schema_json || '{}');
+      const title = data.title || existingParsed.title || '未命名问卷';
+      const description = data.description !== undefined ? data.description : (existingParsed.description || '');
+
+      const mergedSchema = {
+        ...existingParsed,
+        ...data.schema,
+        id: row.id,
+        slug: row.slug,
+        title,
+        description,
+      };
+
+      const stmt = db.prepare(`
+        UPDATE surveys 
+        SET title = ?, description = ?, schema_json = ?, updated_at = ?
+        WHERE id = ?
+      `);
+      const result = stmt.run(title, description, JSON.stringify(mergedSchema, null, 2), now, row.id);
+      return Number(result.changes) > 0;
+    } catch (err) {
+      console.error('[SurveyService] 更新问卷内容失败:', err);
+      return false;
+    }
+  }
+
+  /**
    * 新建或发布问卷（ID 强制由算法生成）
    */
   public static createSurvey(data: {
