@@ -18,9 +18,10 @@ export interface DocumentItem {
 }
 
 export interface AiPipelineStreamEvent {
-  type: 'stage_start' | 'blueprint_ready' | 'question_drafted' | 'persisted' | 'completed' | 'error';
+  type: 'stage_start' | 'thought_chunk' | 'blueprint_ready' | 'question_drafted' | 'persisted' | 'completed' | 'error';
   stage?: 'planning' | 'generating' | string;
   message?: string;
+  delta?: string;
   blueprint?: any;
   question?: any;
   index?: number;

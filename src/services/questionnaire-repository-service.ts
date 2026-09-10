@@ -20,7 +20,7 @@ export interface SurveyMetadataItem {
   responseCount: number;
   createdAt: string;
   isStatic?: boolean;
-  status: 'published' | 'draft';
+  status: 'published' | 'paused';
 }
 
 export class QuestionnaireRepositoryService {
@@ -41,6 +41,7 @@ export class QuestionnaireRepositoryService {
         questionsCount: number;
         responseCount: number;
         createdAt: string;
+        status?: 'published' | 'paused';
       }>;
 
       return data.map((item) => ({
@@ -51,11 +52,31 @@ export class QuestionnaireRepositoryService {
         questionsCount: item.questionsCount,
         responseCount: item.responseCount || 0,
         createdAt: item.createdAt,
-        status: 'published',
+        status: item.status === 'paused' ? 'paused' : 'published',
       }));
     } catch (err) {
       console.warn('[RepositoryService] 从后端拉取问卷列表失败，回退至静态文件兜底:', err);
       return this.fallbackListStaticSurveys();
+    }
+  }
+
+  /**
+   * 更新问卷状态（开启/暂停）
+   */
+  public static async updateSurveyStatus(
+    idOrSlug: string,
+    status: 'published' | 'paused'
+  ): Promise<boolean> {
+    try {
+      const resp = await fetch(`/api/surveys/${encodeURIComponent(idOrSlug)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      return resp.ok;
+    } catch (err) {
+      console.error('[RepositoryService] 更新问卷状态网络异常:', err);
+      return false;
     }
   }
 

@@ -40,8 +40,8 @@ export default defineConfig({
         target: 'http://127.0.0.1:3125',
         router: () => getBackendTarget(),
         changeOrigin: true,
-        timeout: 120000,
-        proxyTimeout: 120000,
+        timeout: 600000,
+        proxyTimeout: 600000,
         configure: (proxy) => {
           proxy.on('error', (err, _req, res) => {
             const currentTarget = getBackendTarget();

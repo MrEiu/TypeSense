@@ -38,7 +38,11 @@ export class LlmLogger {
     action: string,
     ai: { client: OpenAI; model: string },
     createParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
+    streamCallbacks?: {
+      onThought?: (delta: string) => void;
+      onContent?: (delta: string) => void;
+    }
   ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     const startTime = Date.now();
     const messages = (createParams.messages || []).map((m) => ({
@@ -47,9 +51,74 @@ export class LlmLogger {
     }));
 
     try {
-      const response = await ai.client.chat.completions.create(createParams);
+      let rawOutput = '';
+      let inThinkTag = false;
+
+      try {
+        // 优先采用底层流式接收 (stream: true) 并实时收集 Token 分块，
+        // 彻底解决大问卷推理长耗时 (>60s) 时 Node.js undici / 网络代理 60 秒空闲超时终止 (TypeError: terminated / SocketError: other side closed)
+        const stream = await ai.client.chat.completions.create({
+          ...createParams,
+          stream: true,
+        });
+
+        for await (const chunk of stream) {
+          const deltaObj = (chunk.choices[0]?.delta as any) || {};
+          const reasoningDelta = deltaObj.reasoning_content || '';
+          const contentDelta = deltaObj.content || '';
+
+          // 1. 标准 reasoning_content 字段 (DeepSeek-R1 / SiliconFlow / OpenAI 兼容推理接口)
+          if (reasoningDelta) {
+            streamCallbacks?.onThought?.(reasoningDelta);
+          }
+
+          // 2. 内联 <think>...</think> 标签解析支持 (Ollama / 开源权重格式)
+          if (contentDelta) {
+            let remaining = contentDelta;
+
+            if (!inThinkTag && remaining.includes('<think>')) {
+              const parts = remaining.split('<think>');
+              if (parts[0]) {
+                rawOutput += parts[0];
+                streamCallbacks?.onContent?.(parts[0]);
+              }
+              inThinkTag = true;
+              remaining = parts.slice(1).join('<think>');
+            }
+
+            if (inThinkTag) {
+              if (remaining.includes('</think>')) {
+                const parts = remaining.split('</think>');
+                if (parts[0]) {
+                  streamCallbacks?.onThought?.(parts[0]);
+                }
+                inThinkTag = false;
+                const afterThink = parts.slice(1).join('</think>');
+                if (afterThink) {
+                  rawOutput += afterThink;
+                  streamCallbacks?.onContent?.(afterThink);
+                }
+              } else {
+                streamCallbacks?.onThought?.(remaining);
+              }
+            } else {
+              rawOutput += remaining;
+              streamCallbacks?.onContent?.(remaining);
+            }
+          }
+        }
+      } catch (streamErr: any) {
+        // 若目标第三方接口不兼容 stream: true，则自动降级回退至常规请求
+        if (rawOutput.length === 0) {
+          console.warn(`[LlmLogger] 流式模式失败，正在降级尝试非流式请求:`, streamErr.message);
+          const fallbackRes = await ai.client.chat.completions.create(createParams);
+          rawOutput = fallbackRes.choices[0]?.message?.content || '';
+        } else {
+          throw streamErr;
+        }
+      }
+
       const durationMs = Date.now() - startTime;
-      const rawOutput = response.choices[0]?.message?.content || '';
 
       this.appendLog({
         action,
@@ -60,7 +129,27 @@ export class LlmLogger {
         metadata,
       });
 
-      return response;
+      // 构造标准 ChatCompletion 结果返回给上层业务，零侵入无缝兼容
+      const syntheticResponse: OpenAI.Chat.Completions.ChatCompletion = {
+        id: `chatcmpl_stream_${Date.now()}`,
+        created: Math.floor(Date.now() / 1000),
+        model: createParams.model || ai.model,
+        object: 'chat.completion',
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: rawOutput,
+              refusal: null,
+            },
+            finish_reason: 'stop',
+            logprobs: null,
+          },
+        ],
+      };
+
+      return syntheticResponse;
     } catch (err: any) {
       const durationMs = Date.now() - startTime;
       this.appendLog({

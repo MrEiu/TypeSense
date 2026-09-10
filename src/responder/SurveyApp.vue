@@ -120,6 +120,12 @@ async function initSurvey() {
     const loadedSurvey = await QuestionnaireRepositoryService.getSurvey(surveyId.trim());
     survey.value = loadedSurvey;
 
+    if (loadedSurvey.status === 'paused') {
+      error.value = '该问卷当前已暂停收集答卷，感谢您的关注！';
+      loading.value = false;
+      return;
+    }
+
     // 检查本地是否存在有效草稿
     const draft = DraftStorageService.getDraft(loadedSurvey.id);
     if (draft && draft.answeredCount > 0) {

@@ -61,6 +61,7 @@ export interface SurveyBlueprint {
 
 export type PipelineEvent =
   | { type: 'stage_start'; stage: 'planning' | 'generating'; message: string }
+  | { type: 'thought_chunk'; delta: string }
   | { type: 'blueprint_ready'; blueprint: SurveyBlueprint }
   | { type: 'question_drafted'; question: QuestionItemModel; index: number; total: number }
   | { type: 'completed'; survey: QuestionnaireModel; sessionId: string }
@@ -79,7 +80,7 @@ export class AiGeneratorService {
     const client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseURL || undefined,
-      timeout: 180000, // 3 分钟客户端超时，避免大题目量直出时连接过早被切断
+      timeout: 600000, // 10 分钟客户端超时，充分保障大题目量深思模型直出
       maxRetries: 2,
     });
 
@@ -87,11 +88,13 @@ export class AiGeneratorService {
   }
 
   /**
-  /**
    * 极简高自由度单次直出生成 (Direct Lean Survey Generation)
    * 只定义标准数据契约规范，彻底消除死板说教与保姆式限制，赋予 AI 最大推演自由度。
    */
-  public static async generateDirectSurvey(options: GenerationOptions): Promise<QuestionnaireModel> {
+  public static async generateDirectSurvey(
+    options: GenerationOptions,
+    onThought?: (delta: string) => void
+  ): Promise<QuestionnaireModel> {
     const ai = this.getOpenAI();
     const targetCount = Math.max(3, Math.min(80, options.targetCount || 8));
     const docText = options.documentText ? options.documentText.slice(0, 25000) : '';
@@ -151,7 +154,8 @@ ${jumpConstraint}
             { role: 'user', content: userPrompt },
           ],
         },
-        { targetCount, enableJumpLogic: options.enableJumpLogic }
+        { targetCount, enableJumpLogic: options.enableJumpLogic },
+        { onThought }
       );
 
       const raw = response.choices[0]?.message?.content;
@@ -232,7 +236,9 @@ ${jumpConstraint}
         message: '正在基于调研诉求自主推演问卷架构与题目流向...',
       });
 
-      const finalSurvey = await this.generateDirectSurvey(options);
+      const finalSurvey = await this.generateDirectSurvey(options, (delta) => {
+        onEvent({ type: 'thought_chunk', delta });
+      });
 
       // 下发每道题目就绪事件供流式反馈
       finalSurvey.questions.forEach((q, idx) => {

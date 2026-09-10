@@ -63,8 +63,10 @@ export interface QuestionItemModel {
  */
 export interface QuestionnaireModel {
   id: string;
+  slug?: string;
   title: string;
   description?: string;
+  status?: 'published' | 'paused';
   questions: QuestionItemModel[];
 }
 

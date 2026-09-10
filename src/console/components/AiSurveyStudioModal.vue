@@ -29,6 +29,10 @@ import {
   Check,
   Zap,
   RotateCcw,
+  ChevronDown,
+  ChevronUp,
+  Brain,
+  Clock,
 } from 'lucide-vue-next';
 import {
   AiGeneratorClientService,
@@ -89,6 +93,31 @@ const currentBlockIndex = ref<number>(0);
 // 极速直出全卷实体
 const directSurvey = ref<QuestionnaireModel | null>(null);
 const isDirectGenerating = ref(false);
+
+// AI 思考链与实时题目生成流式状态
+const thoughtContent = ref('');
+const isThinkingExpanded = ref(true);
+const thoughtDurationSec = ref(0);
+const isThinkingFinished = ref(false);
+const thoughtScrollRef = ref<HTMLDivElement | null>(null);
+const draftedQuestions = ref<QuestionItemModel[]>([]);
+let thoughtTimer: any = null;
+
+function startThoughtTimer() {
+  stopThoughtTimer();
+  thoughtDurationSec.value = 0;
+  isThinkingFinished.value = false;
+  thoughtTimer = setInterval(() => {
+    thoughtDurationSec.value += 1;
+  }, 1000);
+}
+
+function stopThoughtTimer() {
+  if (thoughtTimer) {
+    clearInterval(thoughtTimer);
+    thoughtTimer = null;
+  }
+}
 
 const isPlanning = ref(false);
 const isGeneratingChunk = ref(false);
@@ -220,7 +249,7 @@ async function handleDeleteDoc(id: string) {
 }
 
 /**
- * 极简极速直出一键生成问卷 (Direct Lean Survey Generation)
+ * 极简极速直出一键生成问卷 (Direct Lean Survey Generation - SSE 流式驱动)
  */
 async function handleDirectGenerate() {
   if (!userPrompt.value.trim() && !selectedDocId.value) {
@@ -230,27 +259,66 @@ async function handleDirectGenerate() {
 
   isDirectGenerating.value = true;
   errorMessage.value = null;
-  statusMessage.value = '正在基于极简契约自主推演全卷题目与逻辑流向 (预计 2~4 秒)...';
+  statusMessage.value = '正在基于极简契约启动 AI 深度思考与问卷拓扑推演...';
   persistedInfo.value = null;
   blueprint.value = null;
+  directSurvey.value = null;
   blocks.value = [];
+  thoughtContent.value = '';
+  draftedQuestions.value = [];
+  isThinkingExpanded.value = true;
+  startThoughtTimer();
 
   try {
-    const survey = await AiGeneratorClientService.generateDirectSurvey({
-      prompt: userPrompt.value,
-      documentId: selectedDocId.value || undefined,
-      templateIds: selectedTemplateIds.value.length > 0 ? selectedTemplateIds.value : undefined,
-      targetCount: targetCount.value,
-      enableJumpLogic: enableJumpLogic.value,
-    });
-
-    directSurvey.value = survey;
-    statusMessage.value = `🎉 问卷已极速推演完毕！共生成 ${survey.questions.length} 道题目拓扑。`;
-    await syncCanvas();
+    await AiGeneratorClientService.startGenerationStream(
+      {
+        prompt: userPrompt.value,
+        documentId: selectedDocId.value || undefined,
+        templateIds: selectedTemplateIds.value.length > 0 ? selectedTemplateIds.value : undefined,
+        targetCount: targetCount.value,
+        enableJumpLogic: enableJumpLogic.value,
+      },
+      (event) => {
+        if (event.type === 'thought_chunk' && event.delta) {
+          thoughtContent.value += event.delta;
+          nextTick(() => {
+            if (thoughtScrollRef.value) {
+              thoughtScrollRef.value.scrollTop = thoughtScrollRef.value.scrollHeight;
+            }
+          });
+        } else if (event.type === 'stage_start') {
+          statusMessage.value = event.message || '正在推演问卷架构与题目流向...';
+        } else if (event.type === 'question_drafted' && event.question) {
+          isThinkingFinished.value = true;
+          stopThoughtTimer();
+          draftedQuestions.value.push(event.question);
+          statusMessage.value = `正在实时生成题目 (${event.index || draftedQuestions.value.length}/${event.total || targetCount.value}): ${event.question.title}`;
+        } else if (event.type === 'completed' && event.survey) {
+          isThinkingFinished.value = true;
+          stopThoughtTimer();
+          directSurvey.value = event.survey;
+          statusMessage.value = `🎉 问卷已极速推演完毕！共生成 ${event.survey.questions.length} 道题目拓扑。`;
+          syncCanvas();
+        } else if (event.type === 'persisted') {
+          persistedInfo.value = {
+            surveyId: event.surveyId || '',
+            accessUrl: event.accessUrl || '',
+            canvasUrl: event.canvasUrl || '',
+          };
+        } else if (event.type === 'error') {
+          isThinkingFinished.value = true;
+          stopThoughtTimer();
+          errorMessage.value = event.error || '生成问卷失败';
+        }
+      }
+    );
   } catch (err: any) {
-    errorMessage.value = err?.message || '极速生成问卷失败';
+    isThinkingFinished.value = true;
+    stopThoughtTimer();
+    errorMessage.value = err?.message || '生成问卷失败';
   } finally {
     isDirectGenerating.value = false;
+    stopThoughtTimer();
   }
 }
 
@@ -455,6 +523,11 @@ function resetStudioState() {
   showInterventionInput.value = false;
   refineInstruction.value = '';
   persistedInfo.value = null;
+  thoughtContent.value = '';
+  draftedQuestions.value = [];
+  thoughtDurationSec.value = 0;
+  isThinkingFinished.value = false;
+  stopThoughtTimer();
 }
 
 function handleCloseModal() {
@@ -477,12 +550,17 @@ watch(
     } else {
       isAutoRunning.value = false;
       shouldPauseAuto.value = true;
+      stopThoughtTimer();
       if (persistedInfo.value) {
         resetStudioState();
       }
     }
   }
 );
+
+onUnmounted(() => {
+  stopThoughtTimer();
+});
 
 onMounted(() => {
   loadDocuments();
@@ -702,13 +780,58 @@ onMounted(() => {
 
       <!-- 右侧主视界：自组织无限幕布原生容器与悬浮控制舱 -->
       <main class="right-canvas-stage">
-        <!-- 当尚未规划蓝图且未直出时的引导遮罩 -->
-        <div v-if="!blueprint && !directSurvey" class="canvas-empty-guide">
+        <!-- 当尚未规划蓝图且未直出且不在生成中的引导遮罩 -->
+        <div v-if="!blueprint && !directSurvey && !isDirectGenerating && !thoughtContent" class="canvas-empty-guide">
           <div class="guide-sparkle-circle">
             <Compass :size="38" />
           </div>
           <h3>自组织无限幕布待命中</h3>
-          <p>在左侧输入调研诉求并点击「AI 极速一键智造」，AI 将在 2~4 秒内自主推演全卷题目并在幕布上呈现拓扑与流向。</p>
+          <p>在左侧输入调研诉求并点击「AI 极速一键智造」，AI 将实时呈现深度推演思维链，并在幕布上呈现拓扑与流向。</p>
+        </div>
+
+        <!-- 实时 AI 深度思考推演悬浮卡片 (DeepSeek / ChatGPT 风格) -->
+        <div v-if="thoughtContent" class="ai-thought-panel" :class="{ 'is-collapsed': !isThinkingExpanded }">
+          <div class="thought-header" @click="isThinkingExpanded = !isThinkingExpanded">
+            <div class="thought-title-group">
+              <div class="thought-spark-icon" :class="{ 'pulsing': !isThinkingFinished }">
+                <Brain :size="15" />
+              </div>
+              <span class="thought-title">AI 深度思考推演过程</span>
+              <span class="thought-timer-pill" :class="{ 'is-active': !isThinkingFinished }">
+                <Clock :size="11" />
+                <span>{{ isThinkingFinished ? `思考完毕 (${thoughtDurationSec}s)` : `思考中 ${thoughtDurationSec}s...` }}</span>
+              </span>
+            </div>
+            <div class="thought-toggle-btn">
+              <ChevronUp v-if="isThinkingExpanded" :size="14" />
+              <ChevronDown v-else :size="14" />
+            </div>
+          </div>
+
+          <div v-show="isThinkingExpanded" ref="thoughtScrollRef" class="thought-body">
+            <pre class="thought-text-stream">{{ thoughtContent }}</pre>
+          </div>
+        </div>
+
+        <!-- 实时生成中的题目预览流 (直出生成中且已有题目流出时展示) -->
+        <div v-if="isDirectGenerating && draftedQuestions.length > 0 && !directSurvey" class="live-draft-stream-overlay">
+          <div class="live-draft-header">
+            <Sparkles :size="14" class="anim-spin" />
+            <span>正在实时拟定题目拓扑 (已生成 {{ draftedQuestions.length }} 道)...</span>
+          </div>
+          <div class="live-draft-grid">
+            <div v-for="(q, qIdx) in draftedQuestions" :key="q.id" class="live-draft-card">
+              <div class="live-card-top">
+                <span class="live-card-idx">#{{ qIdx + 1 }}</span>
+                <span class="live-card-badge">{{ q.type }}</span>
+                <span v-if="q.jump" class="live-card-jump-badge">Jump</span>
+              </div>
+              <div class="live-card-title">{{ q.title }}</div>
+              <div v-if="q.options && q.options.length" class="live-card-opts">
+                {{ q.options.length }} 个选项 ({{ q.options.slice(0, 2).join(' / ') }}{{ q.options.length > 2 ? '...' : '' }})
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 核心视口：基于 Vue Flow 的全景响应式画布 -->
@@ -1624,5 +1747,207 @@ onMounted(() => {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* ==================== AI 深度思考推演看板 (DeepSeek 风格) ==================== */
+.ai-thought-panel {
+  position: relative;
+  z-index: 15;
+  margin: 16px 20px 0 20px;
+  background: rgba(13, 21, 39, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 12px 30px -6px rgba(0, 0, 0, 0.6);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.ai-thought-panel.is-collapsed {
+  background: rgba(13, 21, 39, 0.75);
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.thought-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(99, 102, 241, 0.08);
+  transition: background 0.2s;
+}
+
+.thought-header:hover {
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.thought-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thought-spark-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+}
+
+.thought-spark-icon.pulsing {
+  animation: brainPulse 2s ease-in-out infinite;
+}
+
+@keyframes brainPulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6); }
+  50% { transform: scale(1.08); box-shadow: 0 0 14px 4px rgba(168, 85, 247, 0.6); }
+}
+
+.thought-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.thought-timer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #94a3b8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.thought-timer-pill.is-active {
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.thought-toggle-btn {
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+
+.thought-header:hover .thought-toggle-btn {
+  color: #fff;
+}
+
+.thought-body {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 12px 16px;
+  background: rgba(6, 11, 23, 0.6);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.thought-text-stream {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #94a3b8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ==================== 实时题目拟定预览流 ==================== */
+.live-draft-stream-overlay {
+  position: relative;
+  z-index: 10;
+  margin: 14px 20px;
+  padding: 14px 16px;
+  background: rgba(13, 21, 39, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.live-draft-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #a5b4fc;
+  margin-bottom: 12px;
+}
+
+.live-draft-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.live-draft-card {
+  padding: 10px 12px;
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: draftCardSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes draftCardSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.live-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.live-card-idx {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #6366f1;
+}
+
+.live-card-badge {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.live-card-jump-badge {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.live-card-title {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #f1f5f9;
+  line-height: 1.35;
+}
+
+.live-card-opts {
+  font-size: 0.7rem;
+  color: #64748b;
 }
 </style>

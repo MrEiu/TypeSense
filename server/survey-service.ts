@@ -22,6 +22,7 @@ export interface SurveySummaryItem {
   questionsCount: number;
   responseCount: number;
   createdAt: string;
+  status: 'published' | 'paused';
 }
 
 export class SurveyService {
@@ -54,9 +55,13 @@ export class SurveyService {
 
     return rows.map((row) => {
       let questionsCount = 0;
+      let status: 'published' | 'paused' = 'published';
       try {
         const parsed = JSON.parse(row.schema_json);
         questionsCount = Array.isArray(parsed.questions) ? parsed.questions.length : 0;
+        if (parsed.status === 'paused') {
+          status = 'paused';
+        }
       } catch {
         questionsCount = 0;
       }
@@ -69,6 +74,7 @@ export class SurveyService {
         questionsCount,
         responseCount: Number(row.response_count) || 0,
         createdAt: row.created_at,
+        status,
       };
     });
   }
@@ -87,12 +93,45 @@ export class SurveyService {
 
     try {
       const parsed = JSON.parse(row.schema_json) as Record<string, unknown>;
-      // 保证返回的问卷对象中 id 为算法生成的唯一标识
       parsed.id = row.id;
       parsed.slug = row.slug;
+      if (!parsed.status) {
+        parsed.status = 'published';
+      }
       return parsed;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * 更新问卷收集状态（开启/暂停）
+   */
+  public static updateSurveyStatus(idOrSlug: string, status: 'published' | 'paused'): boolean {
+    const row = db.prepare(`
+      SELECT id, schema_json FROM surveys 
+      WHERE id = ? OR slug = ?
+      LIMIT 1
+    `).get(idOrSlug, idOrSlug) as { id: string; schema_json: string } | undefined;
+
+    if (!row) return false;
+
+    try {
+      const parsed = JSON.parse(row.schema_json);
+      parsed.status = status;
+      const updatedJson = JSON.stringify(parsed, null, 2);
+      const now = new Date().toISOString();
+
+      const stmt = db.prepare(`
+        UPDATE surveys 
+        SET schema_json = ?, updated_at = ?
+        WHERE id = ?
+      `);
+      const result = stmt.run(updatedJson, now, row.id);
+      return Number(result.changes) > 0;
+    } catch (err) {
+      console.error('[SurveyService] 更新状态失败:', err);
+      return false;
     }
   }
 

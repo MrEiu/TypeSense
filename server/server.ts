@@ -101,6 +101,28 @@ app.delete('/api/surveys/:id', (req: Request, res: Response) => {
   }
 });
 
+/**
+ * 更新问卷收集状态（开启/暂停）
+ */
+app.patch('/api/surveys/:id/status', (req: Request, res: Response) => {
+  try {
+    const { status } = req.body || {};
+    if (status !== 'published' && status !== 'paused') {
+      res.status(400).json({ error: '无效的状态参数，必须为 published 或 paused' });
+      return;
+    }
+    const success = SurveyService.updateSurveyStatus(req.params.id, status);
+    if (!success) {
+      res.status(404).json({ error: '问卷不存在或更新失败' });
+      return;
+    }
+    res.json({ success, status });
+  } catch (err) {
+    console.error('[API] updateSurveyStatus 异常:', err);
+    res.status(500).json({ error: '更新问卷状态失败' });
+  }
+});
+
 // ==================== 短链与访问网关 ====================
 
 /**
