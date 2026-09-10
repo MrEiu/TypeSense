@@ -19,6 +19,7 @@ import { SurveyService } from './survey-service';
 import { ResponseService } from './response-service';
 import { DocumentService } from './document-service';
 import { AiGeneratorService } from './ai-generator-service';
+import { ConcurrentPipelineService } from './concurrent-pipeline-service';
 import { ConfigService } from './config-service';
 import { TemplateService } from './template-service';
 
@@ -390,13 +391,12 @@ app.post('/api/ai/generate-stream', async (req: Request, res: Response) => {
       return;
     }
 
-    const generatedSurvey = await AiGeneratorService.executePipeline(
+    const generatedSurvey = await ConcurrentPipelineService.executeConcurrentPipeline(
       {
-        documentId,
-        documentText,
-        templateIds: activeTemplateIds,
         prompt: userPrompt,
         targetCount: Number(targetCount) || 8,
+        documentText,
+        templateIds: activeTemplateIds,
         enableJumpLogic: enableJumpLogic !== false,
       },
       (event) => {
@@ -472,7 +472,7 @@ app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
 });
 
 /**
- * 规划全景蓝图与题组块 (Stage 1)
+ * 规划全景任务计划与题组块 (Stage 1 / Dispatcher)
  */
 app.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
   try {
@@ -489,54 +489,50 @@ app.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
       if (doc) documentText = doc.extractedText;
     }
 
-    const blueprint = await AiGeneratorService.planBlueprint(
-      (prompt || '').trim(),
-      documentText,
-      Number(targetCount) || 8,
-      activeTemplateIds
-    );
-
-    res.json({ success: true, blueprint });
-  } catch (err: any) {
-    console.error('[API] plan-blueprint 异常:', err);
-    res.status(500).json({ success: false, error: err?.message || '规划全景蓝图失败' });
-  }
-});
-
-/**
- * 单组块题目生成 (Stage 2 单步出题与重拟)
- */
-app.post('/api/ai/generate-chunk', async (req: Request, res: Response) => {
-  try {
-    const { blueprint, block, existingQuestions, enableJumpLogic, refinePrompt, documentId, templateIds, templateId } = req.body || {};
-    if (!blueprint || !block) {
-      res.status(400).json({ success: false, error: '缺少 blueprint 或 block 定义' });
-      return;
-    }
-
-    const activeTemplateIds = Array.isArray(templateIds)
-      ? templateIds
-      : templateId
-      ? [templateId]
-      : undefined;
-
-    let documentText = '';
-    if (documentId) {
-      const doc = DocumentService.getDocument(documentId);
-      if (doc) documentText = doc.extractedText;
-    }
-
-    const questions = await AiGeneratorService.generateBlockQuestions({
-      blueprint,
-      block,
-      existingQuestions: Array.isArray(existingQuestions) ? existingQuestions : [],
-      enableJumpLogic: enableJumpLogic !== false,
-      refinePrompt: (refinePrompt || '').trim(),
+    const taskPlan = await ConcurrentPipelineService.planTasks({
+      prompt: (prompt || '').trim(),
+      targetCount: Number(targetCount) || 8,
       documentText,
       templateIds: activeTemplateIds,
     });
 
-    res.json({ success: true, questions, blockId: block.id });
+    const blueprint = {
+      title: taskPlan.title,
+      description: `基于并发多任务拆解智造。`,
+      tasks: taskPlan.tasks,
+      blocks: taskPlan.tasks.map((t) => ({
+        id: t.id,
+        name: t.prompt.slice(0, 24),
+        description: t.prompt,
+        prompt: t.prompt,
+        questionCount: t.count,
+      })),
+    };
+
+    res.json({ success: true, blueprint, taskPlan });
+  } catch (err: any) {
+    console.error('[API] plan-blueprint 异常:', err);
+    res.status(500).json({ success: false, error: err?.message || '规划全景任务失败' });
+  }
+});
+
+/**
+ * 单组块题目生成 (Stage 2 / Worker Agent)
+ */
+app.post('/api/ai/generate-chunk', async (req: Request, res: Response) => {
+  try {
+    const { block, refinePrompt } = req.body || {};
+    const blockId = (block?.id || 'b1') as `b${number}`;
+    const count = Number(block?.questionCount || block?.count) || 3;
+    const taskPrompt = String(block?.prompt || block?.description || refinePrompt || '负责该维度调研题目生成');
+
+    const questions = await ConcurrentPipelineService.generateWorkerChunk({
+      blockId,
+      count,
+      prompt: taskPrompt,
+    });
+
+    res.json({ success: true, questions, blockId });
   } catch (err: any) {
     console.error('[API] generate-chunk 异常:', err);
     res.status(500).json({ success: false, error: err?.message || '生成组块题目失败' });
@@ -554,10 +550,33 @@ app.post('/api/ai/finalize-survey', async (req: Request, res: Response) => {
       return;
     }
 
-    // 全局单遍有向图环路阻断与未引用变量自动清理
-    const safeQuestions = AiGeneratorService.cleanUnusedVariables(
-      AiGeneratorService.fastAcyclicGuard(questions)
-    );
+    // 检查是否包含带组块前缀的局部题号 (如 b1_1)，若有则执行确定性重排
+    let safeQuestions: QuestionItemModel[] = [];
+    const hasBlockPrefix = questions.some((q) => /^[a-z]\d+_\d+/i.test(q.id));
+    if (hasBlockPrefix) {
+      const blockIdSet = new Set<string>();
+      questions.forEach((q) => {
+        const m = q.id.match(/^([a-z]\d+)_\d+/i);
+        if (m) blockIdSet.add(m[1]);
+      });
+      const dummyTasks = Array.from(blockIdSet).map((id) => ({
+        id: id as `b${number}`,
+        count: 0,
+        prompt: '',
+      }));
+      const blockMap = new Map<string, QuestionItemModel[]>();
+      questions.forEach((q) => {
+        const m = q.id.match(/^([a-z]\d+)_\d+/i);
+        const blockId = m ? m[1] : 'b1';
+        if (!blockMap.has(blockId)) blockMap.set(blockId, []);
+        blockMap.get(blockId)!.push(q);
+      });
+      safeQuestions = ConcurrentPipelineService.assembleQuestions(dummyTasks, blockMap);
+    } else {
+      safeQuestions = AiGeneratorService.cleanUnusedVariables(
+        AiGeneratorService.fastAcyclicGuard(questions)
+      );
+    }
 
     const saved = SurveyService.createSurvey({
       title,

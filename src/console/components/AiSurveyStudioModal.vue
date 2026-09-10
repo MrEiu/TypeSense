@@ -440,35 +440,41 @@ async function handleRegenerateCurrentBlock() {
 }
 
 /**
- * 连续自动推进全部剩余组块 (支持随时暂停)
+ * 连续并发推进全部剩余组块 (支持随时暂停，最大并发 3)
  */
 async function handleStartAutoPlay() {
   if (isAutoRunning.value) {
     shouldPauseAuto.value = true;
     isAutoRunning.value = false;
-    statusMessage.value = '自动流水线已暂停，您可以对当前画布卡片进行人工干涉。';
+    statusMessage.value = '并发流水线已暂停，您可以对当前画布卡片进行人工干涉。';
     return;
   }
 
   isAutoRunning.value = true;
   shouldPauseAuto.value = false;
+  statusMessage.value = '正在多 Agent 并发生成各组块题目...';
 
-  for (let i = currentBlockIndex.value; i < blocks.value.length; i++) {
-    if (shouldPauseAuto.value) break;
+  const pendingIndices = blocks.value
+    .map((b, idx) => ({ idx, status: b.status }))
+    .filter((b) => b.status !== 'completed')
+    .map((b) => b.idx);
 
-    currentBlockIndex.value = i;
-    const blk = blocks.value[i];
+  const concurrency = 3;
+  let queuePos = 0;
 
-    if (blk.status !== 'completed') {
-      const ok = await handleGenerateSingleBlock(i);
-      if (!ok || shouldPauseAuto.value) break;
-      // 组块间轻微留白 500ms 便于视觉感知动态拓扑生长
-      await new Promise((r) => setTimeout(r, 500));
+  const workers = Array.from({ length: Math.min(concurrency, pendingIndices.length) }, async () => {
+    while (queuePos < pendingIndices.length) {
+      if (shouldPauseAuto.value) break;
+      const targetIdx = pendingIndices[queuePos++];
+      await handleGenerateSingleBlock(targetIdx);
     }
-  }
+  });
+
+  await Promise.all(workers);
 
   isAutoRunning.value = false;
   shouldPauseAuto.value = false;
+  statusMessage.value = '所有题组块已并发生成完毕，可点击右下方发布问卷！';
 }
 
 /**

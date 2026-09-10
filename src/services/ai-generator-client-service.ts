@@ -257,20 +257,33 @@ export interface LogicTemplateItem {
   questions: QuestionItemModel[];
 }
 
+export interface SurveyTaskItem {
+  id: `b${number}`;
+  count: number;
+  prompt: string;
+}
+
+export interface SurveyTaskPlan {
+  title: string;
+  tasks: SurveyTaskItem[];
+}
+
 export interface SurveyBlockItem {
   id: string;
   name: string;
   description: string;
+  prompt?: string;
   questionCount: number;
   purpose?: 'screening' | 'branching' | 'scoring' | 'feedback' | 'general';
 }
 
 export interface SurveyBlueprintItem {
   title: string;
-  description: string;
-  targetAudience: string;
+  description?: string;
+  targetAudience?: string;
   dimensions?: SurveyBlockItem[];
   blocks: SurveyBlockItem[];
+  tasks?: SurveyTaskItem[];
   variables?: Array<{ name: string; description: string }>;
 }
 
