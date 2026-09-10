@@ -27,6 +27,8 @@ import {
   Plus,
   ShieldCheck,
   LogOut,
+  Settings,
+  Cpu,
 } from 'lucide-vue-next';
 
 import {
@@ -34,6 +36,7 @@ import {
   type SurveyMetadataItem,
 } from '../services/questionnaire-repository-service';
 import { AuthClientService, type UserProfile } from '../services/auth-client-service';
+import { SystemConfigService, type AiSystemConfig } from '../services/system-config-service';
 import { TsButton } from '../components/ui';
 
 // 子功能组件
@@ -44,6 +47,7 @@ import SurveyPublishModal from './components/SurveyPublishModal.vue';
 import SurveyResponsesDrawer from './components/SurveyResponsesDrawer.vue';
 import SurveyDetailDrawer from './components/SurveyDetailDrawer.vue';
 import AiSurveyStudioModal from './components/AiSurveyStudioModal.vue';
+import LlmConfigModal from './components/LlmConfigModal.vue';
 import AuthModal from '../components/auth/AuthModal.vue';
 
 // 严格遵循原有 Zen Paper 浅色主题配置
@@ -87,10 +91,26 @@ const currentFilterTab = ref<string>('all');
 const sortBy = ref<'newest' | 'responses' | 'questions'>('newest');
 const viewMode = ref<'grid' | 'table'>('grid');
 
-// 侧弹窗状态
+// 侧弹窗与系统配置状态
 const isResponsesDrawerOpen = ref(false);
 const isDetailDrawerOpen = ref(false);
 const selectedSurvey = ref<SurveyMetadataItem | null>(null);
+
+// 大模型系统配置状态
+const isLlmConfigModalOpen = ref(false);
+const llmConfig = ref<AiSystemConfig | null>(null);
+const loadingLlmConfig = ref(false);
+
+async function loadLlmConfig() {
+  loadingLlmConfig.value = true;
+  try {
+    llmConfig.value = await SystemConfigService.getConfig();
+  } catch (err) {
+    console.error('[ConsoleApp] 获取大模型配置失败:', err);
+  } finally {
+    loadingLlmConfig.value = false;
+  }
+}
 
 // 菜单配置
 function renderIcon(iconComponent: any) {
@@ -102,6 +122,11 @@ const menuOptions: MenuOption[] = [
     label: '问卷资产管理',
     key: 'all_surveys',
     icon: renderIcon(FileQuestion),
+  },
+  {
+    label: '系统配置',
+    key: 'system_settings',
+    icon: renderIcon(Settings),
   },
 ];
 
@@ -178,6 +203,8 @@ function handleMenuSelect(key: string) {
   activeMenuKey.value = key;
   if (key === 'ai_studio') {
     isAiStudioOpen.value = true;
+  } else if (key === 'system_settings') {
+    loadLlmConfig();
   }
 }
 
@@ -221,6 +248,7 @@ function onAdminLoginSuccess(user: UserProfile) {
   currentUser.value = user;
   showAuthModal.value = false;
   loadSurveys();
+  loadLlmConfig();
 }
 
 // 退出管理登录
@@ -233,6 +261,7 @@ function handleLogout() {
 onMounted(() => {
   if (AuthClientService.isAdmin()) {
     loadSurveys();
+    loadLlmConfig();
   } else {
     showAuthModal.value = true;
   }
@@ -332,48 +361,68 @@ onMounted(() => {
           >
             <div style="display: flex; align-items: center; gap: 16px;">
               <h2 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #0f172a;">
-                问卷管理与分发管控
+                {{ activeMenuKey === 'system_settings' ? '系统配置' : '问卷管理与分发管控' }}
               </h2>
-              <NTag size="small" type="primary" :bordered="false" round>
+              <NTag v-if="activeMenuKey === 'all_surveys'" size="small" type="primary" :bordered="false" round>
                 {{ filteredSurveys.length }} 份问卷
+              </NTag>
+              <NTag v-else-if="activeMenuKey === 'system_settings'" size="small" type="info" :bordered="false" round>
+                大模型与服务参数
               </NTag>
             </div>
 
-            <!-- 顶栏搜索与操作区 (含新建问卷) -->
+            <!-- 顶栏操作区 -->
             <div style="display: flex; align-items: center; gap: 12px;">
-              <NInput
-                v-model:value="searchQuery"
-                placeholder="搜索问卷标题或短码..."
-                clearable
-                size="small"
-                style="width: 240px;"
-              >
-                <template #prefix>
-                  <Search style="width: 14px; height: 14px; color: #94a3b8;" />
-                </template>
-              </NInput>
+              <!-- 问卷管理模式下显示搜索与新建 -->
+              <template v-if="activeMenuKey === 'all_surveys'">
+                <NInput
+                  v-model:value="searchQuery"
+                  placeholder="搜索问卷标题或短码..."
+                  clearable
+                  size="small"
+                  style="width: 240px;"
+                >
+                  <template #prefix>
+                    <Search style="width: 14px; height: 14px; color: #94a3b8;" />
+                  </template>
+                </NInput>
 
-              <NTooltip trigger="hover">
-                <template #trigger>
-                  <NButton size="small" quaternary @click="loadSurveys" :loading="loading">
-                    <template #icon>
-                      <RefreshCw style="width: 15px; height: 15px;" />
-                    </template>
-                  </NButton>
-                </template>
-                重新从 SQLite 数据库同步
-              </NTooltip>
+                <NTooltip trigger="hover">
+                  <template #trigger>
+                    <NButton size="small" quaternary @click="loadSurveys" :loading="loading">
+                      <template #icon>
+                        <RefreshCw style="width: 15px; height: 15px;" />
+                      </template>
+                    </NButton>
+                  </template>
+                  重新从 SQLite 数据库同步
+                </NTooltip>
 
-              <!-- 新建问卷按钮 (唤起 AI 智造工坊) -->
-              <TsButton
-                variant="primary"
-                size="sm"
-                title="创建新问卷 (AI 智造工坊)"
-                @click="isAiStudioOpen = true"
-              >
-                <Sparkles style="width: 13px; height: 13px;" />
-                <span>新建问卷</span>
-              </TsButton>
+                <!-- 新建问卷按钮 (唤起 AI 智造工坊) -->
+                <TsButton
+                  variant="primary"
+                  size="sm"
+                  title="创建新问卷 (AI 智造工坊)"
+                  @click="isAiStudioOpen = true"
+                >
+                  <Sparkles style="width: 13px; height: 13px;" />
+                  <span>新建问卷</span>
+                </TsButton>
+              </template>
+
+              <!-- 系统配置模式下显示刷新配置 -->
+              <template v-else-if="activeMenuKey === 'system_settings'">
+                <NTooltip trigger="hover">
+                  <template #trigger>
+                    <NButton size="small" quaternary @click="loadLlmConfig" :loading="loadingLlmConfig">
+                      <template #icon>
+                        <RefreshCw style="width: 15px; height: 15px;" />
+                      </template>
+                    </NButton>
+                  </template>
+                  重新获取最新系统配置
+                </NTooltip>
+              </template>
 
               <!-- 管理员身份状态与安全登出 -->
               <div
@@ -411,12 +460,13 @@ onMounted(() => {
           <!-- 主内容区域 Content -->
           <NLayoutContent style="padding: 24px 28px 80px 28px;">
             <div style="max-width: 1280px; margin: 0 auto;">
-              <!-- 外层大卡片包裹整个问卷管理与列表区 -->
+              <!-- 1. 问卷资产管理视图 -->
               <NCard
+                v-if="activeMenuKey === 'all_surveys'"
                 :bordered="true"
                 style="border-radius: 14px; background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);"
               >
-                <!-- 1. 筛选与排序工具栏组件 -->
+                <!-- 筛选与排序工具栏组件 -->
                 <SurveyFilterToolbar
                   v-model:filterTab="currentFilterTab"
                   v-model:sortBy="sortBy"
@@ -430,7 +480,7 @@ onMounted(() => {
 
                 <!-- 问卷展示区 -->
                 <div v-else-if="filteredSurveys.length > 0">
-                  <!-- 2. 双栏卡片网格组件 -->
+                  <!-- 双栏卡片网格组件 -->
                   <SurveyCardGrid
                     v-if="viewMode === 'grid'"
                     :surveys="filteredSurveys"
@@ -442,7 +492,7 @@ onMounted(() => {
                     @copy-link="handleCopyLink"
                   />
 
-                  <!-- 3. 数据表格列表组件 -->
+                  <!-- 数据表格列表组件 -->
                   <SurveyTableList
                     v-else
                     :surveys="filteredSurveys"
@@ -466,6 +516,164 @@ onMounted(() => {
                   </NEmpty>
                 </div>
               </NCard>
+
+              <!-- 2. 系统配置视图：大模型服务小卡片 -->
+              <div v-else-if="activeMenuKey === 'system_settings'" style="max-width: 860px;">
+                <div v-if="loadingLlmConfig && !llmConfig" style="padding: 80px 0; text-align: center;">
+                  <NSpin size="large" />
+                </div>
+
+                <NCard
+                  v-else
+                  :bordered="true"
+                  hoverable
+                  style="
+                    border-radius: 14px;
+                    background: #ffffff;
+                    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                  "
+                  @click="isLlmConfigModalOpen = true"
+                >
+                  <template #header>
+                    <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                      <div style="display: flex; align-items: center; gap: 12px;">
+                        <div
+                          style="
+                            width: 40px;
+                            height: 40px;
+                            border-radius: 10px;
+                            background: rgba(79, 70, 229, 0.1);
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            color: #4f46e5;
+                          "
+                        >
+                          <Cpu style="width: 22px; height: 22px;" />
+                        </div>
+                        <div>
+                          <div style="font-size: 1.05rem; font-weight: 700; color: #0f172a;">
+                            AI 大模型服务配置
+                          </div>
+                          <div style="font-size: 0.8rem; color: #64748b; margin-top: 2px;">
+                            配置底层大语言模型的接口地址、访问密钥及生效模型
+                          </div>
+                        </div>
+                      </div>
+                      <NTag
+                        size="small"
+                        :type="llmConfig?.hasApiKey ? 'success' : 'warning'"
+                        :bordered="false"
+                        round
+                      >
+                        {{ llmConfig?.hasApiKey ? '已接入服务' : '未配置密钥' }}
+                      </NTag>
+                    </div>
+                  </template>
+
+                  <!-- 卡片主体展示当前参数 -->
+                  <div
+                    style="
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                      gap: 16px;
+                      padding: 8px 0;
+                    "
+                  >
+                    <div
+                      style="
+                        background: #f8fafc;
+                        padding: 14px 16px;
+                        border-radius: 10px;
+                        border: 1px solid rgba(15, 23, 42, 0.05);
+                      "
+                    >
+                      <div style="font-size: 0.75rem; color: #64748b; font-weight: 600;">
+                        API 地址 (BASE URL)
+                      </div>
+                      <div
+                        style="
+                          font-size: 0.88rem;
+                          font-weight: 600;
+                          color: #1e293b;
+                          margin-top: 6px;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                          white-space: nowrap;
+                        "
+                        :title="llmConfig?.baseURL"
+                      >
+                        {{ llmConfig?.baseURL || '官方默认 (https://api.openai.com/v1)' }}
+                      </div>
+                    </div>
+
+                    <div
+                      style="
+                        background: #f8fafc;
+                        padding: 14px 16px;
+                        border-radius: 10px;
+                        border: 1px solid rgba(15, 23, 42, 0.05);
+                      "
+                    >
+                      <div style="font-size: 0.75rem; color: #64748b; font-weight: 600;">
+                        生效模型 (MODEL)
+                      </div>
+                      <div
+                        style="
+                          font-size: 0.88rem;
+                          font-weight: 600;
+                          color: #4f46e5;
+                          margin-top: 6px;
+                          overflow: hidden;
+                          text-overflow: ellipsis;
+                          white-space: nowrap;
+                        "
+                        :title="llmConfig?.model"
+                      >
+                        {{ llmConfig?.model || '未设定' }}
+                      </div>
+                    </div>
+
+                    <div
+                      style="
+                        background: #f8fafc;
+                        padding: 14px 16px;
+                        border-radius: 10px;
+                        border: 1px solid rgba(15, 23, 42, 0.05);
+                      "
+                    >
+                      <div style="font-size: 0.75rem; color: #64748b; font-weight: 600;">
+                        API 密钥 (API KEY)
+                      </div>
+                      <div
+                        style="
+                          font-size: 0.88rem;
+                          font-weight: 600;
+                          color: #1e293b;
+                          margin-top: 6px;
+                        "
+                      >
+                        {{ llmConfig?.apiKeyMasked || (llmConfig?.hasApiKey ? '已配置 (密文)' : '未填写') }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <template #action>
+                    <div style="display: flex; justify-content: flex-end;">
+                      <NButton
+                        size="small"
+                        type="primary"
+                        secondary
+                        @click.stop="isLlmConfigModalOpen = true"
+                      >
+                        修改详细配置
+                      </NButton>
+                    </div>
+                  </template>
+                </NCard>
+              </div>
             </div>
           </NLayoutContent>
         </NLayout>
@@ -491,6 +699,12 @@ onMounted(() => {
 
         <!-- 弹窗 4：AI 问卷智造工坊 Modal -->
         <AiSurveyStudioModal v-model:show="isAiStudioOpen" @created="loadSurveys" />
+
+        <!-- 弹窗 5：大模型服务接入配置 Modal -->
+        <LlmConfigModal
+          v-model:show="isLlmConfigModalOpen"
+          @saved="(cfg) => (llmConfig = cfg)"
+        />
 
         <!-- 管理员登录鉴权弹窗 (访问控制台强校验) -->
         <AuthModal
