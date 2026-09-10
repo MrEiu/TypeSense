@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, markRaw } from 'vue';
 import {
   ExternalLink,
   ArrowLeft,
@@ -23,8 +23,20 @@ import type {
   JumpRule,
 } from '../schema/questionnaire-schema-types';
 import SurveyFlowCanvas from '../canvas/components/SurveyFlowCanvas.vue';
+import {
+  TsButton,
+  TsInput,
+  TsTextarea,
+  TsSelect,
+  TsSwitch,
+  TsBadge,
+  TsCard,
+  TsSegmented,
+  type SelectOption,
+  type SegmentOption,
+} from '../components/ui';
 
-// 动态状态 (绝无前端写死数据)
+// 动态状态
 const isLoading = ref(true);
 const isSaving = ref(false);
 const saveSuccessToast = ref(false);
@@ -34,7 +46,20 @@ const questionnaire = ref<QuestionnaireModel | null>(null);
 const allSurveys = ref<Array<{ id: string; title: string; slug?: string }>>([]);
 
 // 视图模式: 'flow' 流程拓扑 | 'editor' 题目与逻辑编排
-const viewMode = ref<'flow' | 'editor'>('editor');
+const viewMode = ref<string>('editor');
+
+const viewModeOptions: SegmentOption[] = [
+  { label: '逻辑编排', value: 'editor', icon: markRaw(ListOrdered) },
+  { label: '流程拓扑', value: 'flow', icon: markRaw(GitBranch) },
+];
+
+// 题型选项
+const questionTypeOptions: SelectOption[] = [
+  { label: '单选题 (Single Choice)', value: 'single_choice' },
+  { label: '多选题 (Multiple Choice)', value: 'multiple_choice' },
+  { label: '量表评分 (Likert Scale)', value: 'likert_scale' },
+  { label: '开放问答 (Text Input)', value: 'text_input' },
+];
 
 // 当前选中的题目索引
 const activeQuestionIndex = ref(0);
@@ -53,7 +78,77 @@ const respondentUrl = computed(() => {
   return `/survey.html?id=${encodeURIComponent(targetId)}`;
 });
 
-// 从后端真实拉取问卷
+const surveySelectOptions = computed<SelectOption[]>(() => {
+  return allSurveys.value.map((s) => ({
+    label: s.title,
+    value: s.id,
+  }));
+});
+
+// 跳转目标选项列表
+const jumpTargetOptions = computed<SelectOption[]>(() => {
+  if (!questionnaire.value) return [];
+  const list: SelectOption[] = questionnaire.value.questions.map((q, idx) => ({
+    label: `Q${idx + 1}: ${q.title}`,
+    value: q.id,
+  }));
+  list.push({ label: '🏁 正常结束作答 (End)', value: 'end' });
+  list.push({ label: '🚫 甄别淘汰终止 (Exit)', value: 'exit' });
+  return list;
+});
+
+// 当前题目的选项列表下拉
+function getQuestionOptionChoices(): SelectOption[] {
+  if (!currentQuestion.value || !Array.isArray(currentQuestion.value.options)) return [];
+  return currentQuestion.value.options.map((opt, idx) => {
+    const text = typeof opt === 'string' ? opt : opt.label;
+    return {
+      label: `选项 ${String.fromCharCode(65 + idx)}: ${text}`,
+      value: idx,
+    };
+  });
+}
+
+// 题型切换深度转换与自适应初始化
+function handleQuestionTypeChange(newType: string | number) {
+  if (!currentQuestion.value) return;
+  const targetType = String(newType) as QuestionKind;
+  currentQuestion.value.type = targetType;
+
+  if (targetType === 'text_input') {
+    if (!currentQuestion.value.placeholder) {
+      currentQuestion.value.placeholder = '请输入您的回答内容...';
+    }
+  } else if (targetType === 'likert_scale') {
+    // 智能初始化为 5 点量表
+    if (!currentQuestion.value.options || currentQuestion.value.options.length < 3) {
+      currentQuestion.value.options = ['完全不赞同', '不太赞同', '基本赞同', '非常赞同', '完全赞同'];
+    }
+  } else if (targetType === 'single_choice' || targetType === 'multiple_choice') {
+    // 确保选择题有基础选项
+    if (!currentQuestion.value.options || currentQuestion.value.options.length === 0) {
+      currentQuestion.value.options = ['选项 1', '选项 2', '选项 3'];
+    }
+  }
+  markDirty();
+}
+
+// 一键应用量表预设
+function applyLikertPreset(presetType: 'satisfaction' | 'agreement' | 'frequency' | 'score') {
+  if (!currentQuestion.value) return;
+  if (presetType === 'satisfaction') {
+    currentQuestion.value.options = ['非常不满意', '不太满意', '一般', '比较满意', '非常满意'];
+  } else if (presetType === 'agreement') {
+    currentQuestion.value.options = ['完全不赞同', '不太赞同', '中立', '比较赞同', '非常赞同'];
+  } else if (presetType === 'frequency') {
+    currentQuestion.value.options = ['从不', '极少', '有时', '经常', '总是'];
+  } else if (presetType === 'score') {
+    currentQuestion.value.options = ['1分', '2分', '3分', '4分', '5分'];
+  }
+  markDirty();
+}
+
+// 从后端拉取问卷
 async function loadSurvey(id: string) {
   if (!id) return;
   isLoading.value = true;
@@ -72,10 +167,9 @@ async function loadSurvey(id: string) {
 }
 
 // 切换问卷
-function handleSurveySelect(e: Event) {
-  const target = e.target as HTMLSelectElement;
-  if (target?.value) {
-    loadSurvey(target.value);
+function handleSurveyChange(val: string | number) {
+  if (val) {
+    loadSurvey(String(val));
   }
 }
 
@@ -176,7 +270,7 @@ function updateOptionText(optIndex: number, text: string) {
   markDirty();
 }
 
-// 跳转逻辑规则 (仅关注具体选项条件跳转 when，忽略无意义的 else 兜底)
+// 跳转逻辑规则 (仅关注具体选项条件跳转 when)
 function getConditionalJumpRules(): JumpRule[] {
   if (!currentQuestion.value || !currentQuestion.value.jump) return [];
   if (typeof currentQuestion.value.jump === 'string') return [];
@@ -205,7 +299,6 @@ function removeJumpRule(rule: JumpRule) {
   if (idx > -1) {
     currentQuestion.value.jump.splice(idx, 1);
   }
-  // 清理空规则
   if (currentQuestion.value.jump.length === 0) {
     delete currentQuestion.value.jump;
   }
@@ -216,7 +309,7 @@ function markDirty() {
   isDirty.value = true;
 }
 
-// 保存问卷到后端数据库
+// 保存问卷到数据库
 async function handleSave() {
   if (!questionnaire.value || isSaving.value) return;
   isSaving.value = true;
@@ -261,16 +354,46 @@ function finishEditTitle() {
 function getQuestionTypeName(type: QuestionKind) {
   switch (type) {
     case 'single_choice':
-      return '单选题';
+      return '单选';
     case 'multiple_choice':
-      return '多选题';
+      return '多选';
     case 'likert_scale':
-      return '量表题';
+      return '量表';
     case 'text_input':
-      return '填空题';
+      return '填空';
     default:
       return '题目';
   }
+}
+
+function getQuestionTypeBadgeVariant(type: QuestionKind): 'primary' | 'info' | 'success' | 'warning' | 'neutral' {
+  switch (type) {
+    case 'single_choice':
+      return 'primary';
+    case 'multiple_choice':
+      return 'info';
+    case 'likert_scale':
+      return 'success';
+    case 'text_input':
+      return 'warning';
+    default:
+      return 'neutral';
+  }
+}
+
+// 点击返回直接关闭当前工作台标签页
+function handleClosePage() {
+  window.close();
+  // 容错降级：若浏览器对非 script 打开的页面限制 window.close()，自动回退上一页
+  setTimeout(() => {
+    if (!window.closed) {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.href = '/';
+      }
+    }
+  }, 120);
 }
 
 onMounted(async () => {
@@ -289,7 +412,7 @@ onMounted(async () => {
       isLoading.value = false;
     }
   } catch (err) {
-    console.error('[Studio] 初始化加载问卷失败:', err);
+    console.error('[Studio] 初始化加载失败:', err);
     isLoading.value = false;
   }
 
@@ -308,94 +431,86 @@ onMounted(async () => {
     <!-- 顶部工作台顶栏 -->
     <header class="studio-header">
       <div class="header-left">
-        <a href="/" class="back-link" title="返回控制台">
+        <TsButton
+          variant="ghost"
+          size="sm"
+          title="关闭工作台并返回控制台"
+          @click="handleClosePage"
+        >
           <ArrowLeft style="width: 15px; height: 15px;" />
-        </a>
+        </TsButton>
 
         <div class="brand-group">
-          <span class="brand-tag">STUDIO</span>
+          <TsBadge variant="primary" size="sm">STUDIO</TsBadge>
           <span class="brand-name">TypeSense</span>
         </div>
 
         <div class="divider-v"></div>
 
-        <!-- 问卷标题 (动态) -->
+        <!-- 问卷标题 (行内即时编辑) -->
         <div v-if="questionnaire" class="title-area">
           <div v-if="!isEditingTitle" class="title-display" @click="startEditTitle" title="点击编辑问卷标题">
             <span class="title-text">{{ questionnaire.title }}</span>
-            <Edit3 style="width: 13px; height: 13px; opacity: 0.6;" />
+            <Edit3 style="width: 12px; height: 12px; opacity: 0.5;" />
           </div>
-          <input
+          <TsInput
             v-else
             v-model="tempTitle"
-            class="title-input"
+            size="sm"
+            style="width: 260px;"
             autofocus
             @blur="finishEditTitle"
-            @keyup.enter="finishEditTitle"
+            @change="finishEditTitle"
           />
         </div>
       </div>
 
-      <!-- 中心视图模式切换 -->
+      <!-- 中心视图模式分段器 (TsSegmented) -->
       <div class="header-center">
-        <div class="segmented-control">
-          <button
-            class="segment-btn"
-            :class="{ active: viewMode === 'editor' }"
-            @click="viewMode = 'editor'"
-          >
-            <ListOrdered style="width: 14px; height: 14px;" />
-            <span>逻辑编排</span>
-          </button>
-
-          <button
-            class="segment-btn"
-            :class="{ active: viewMode === 'flow' }"
-            @click="viewMode = 'flow'"
-          >
-            <GitBranch style="width: 14px; height: 14px;" />
-            <span>流程拓扑</span>
-          </button>
-        </div>
+        <TsSegmented
+          v-model="viewMode"
+          :options="viewModeOptions"
+          size="sm"
+        />
       </div>
 
-      <!-- 右侧操作 -->
+      <!-- 右侧操作栏 (TsButton + TsSelect) -->
       <div class="header-right">
         <!-- 切换问卷 -->
-        <select
+        <TsSelect
           v-if="allSurveys.length > 1"
-          class="survey-select"
-          :value="currentSurveyId"
-          @change="handleSurveySelect"
-        >
-          <option v-for="s in allSurveys" :key="s.id" :value="s.id">
-            {{ s.title }}
-          </option>
-        </select>
+          :model-value="currentSurveyId"
+          :options="surveySelectOptions"
+          size="sm"
+          style="min-width: 140px;"
+          @update:model-value="handleSurveyChange"
+        />
 
         <!-- 保存按钮 -->
-        <button
+        <TsButton
           v-if="questionnaire"
-          class="save-btn"
-          :class="{ 'is-dirty': isDirty }"
-          :disabled="isSaving"
+          :variant="isDirty ? 'primary' : 'secondary'"
+          size="sm"
+          :loading="isSaving"
           @click="handleSave"
         >
           <Save style="width: 14px; height: 14px;" />
-          <span>{{ isSaving ? '保存中...' : isDirty ? '保存改动 *' : '已保存' }}</span>
-        </button>
+          <span>{{ isDirty ? '保存改动 *' : '已保存' }}</span>
+        </TsButton>
 
         <!-- 受访体验 -->
-        <a
+        <TsButton
           v-if="questionnaire"
+          as="a"
           :href="respondentUrl"
           target="_blank"
-          class="preview-link"
+          variant="secondary"
+          size="sm"
           title="在新标签页体验真实作答"
         >
           <ExternalLink style="width: 14px; height: 14px;" />
           <span>受访体验</span>
-        </a>
+        </TsButton>
       </div>
     </header>
 
@@ -409,10 +524,12 @@ onMounted(async () => {
 
       <!-- 2. 无问卷空状态 -->
       <div v-else-if="!questionnaire" class="state-stage">
-        <AlertCircle style="width: 40px; height: 40px; color: #94a3b8;" />
+        <AlertCircle style="width: 44px; height: 44px; color: #94a3b8;" />
         <h3>未找到对应的问卷数据</h3>
-        <p>请确认问卷 ID 是否正确，或返回控制台选择问卷进行编排。</p>
-        <a href="/" class="empty-back-btn">← 返回问卷控制台</a>
+        <p>请确认问卷 ID 是否正确，或返回控制台选择问卷。</p>
+        <TsButton as="a" href="/" variant="primary" size="md">
+          ← 返回控制台
+        </TsButton>
       </div>
 
       <!-- 3. 流程拓扑全屏模式 -->
@@ -430,12 +547,12 @@ onMounted(async () => {
           <div class="outline-head">
             <div class="outline-meta">
               <span class="outline-label">题目大纲</span>
-              <span class="outline-badge">{{ questionnaire.questions.length }} 题</span>
+              <TsBadge variant="neutral" size="sm">{{ questionnaire.questions.length }} 题</TsBadge>
             </div>
-            <button class="add-btn" @click="addQuestion('single_choice')">
-              <Plus style="width: 13px; height: 13px;" />
+            <TsButton variant="primary" size="xs" @click="addQuestion('single_choice')">
+              <Plus style="width: 12px; height: 12px;" />
               <span>添加题目</span>
-            </button>
+            </TsButton>
           </div>
 
           <div class="outline-body">
@@ -448,111 +565,180 @@ onMounted(async () => {
             >
               <div class="node-left">
                 <span class="node-seq">Q{{ idx + 1 }}</span>
-                <span class="node-type" :class="q.type">{{ getQuestionTypeName(q.type) }}</span>
+                <TsBadge :variant="getQuestionTypeBadgeVariant(q.type)" size="sm">
+                  {{ getQuestionTypeName(q.type) }}
+                </TsBadge>
                 <span class="node-title" :title="q.title">{{ q.title }}</span>
               </div>
 
               <div class="node-actions" @click.stop>
                 <span v-if="q.jump" class="node-jump-flag" title="包含分支跳转规则">⚡</span>
-                <button
-                  class="action-icon"
+                <TsButton
+                  variant="ghost"
+                  size="xs"
+                  class="action-mini-btn"
                   :disabled="idx === 0"
                   title="上移"
                   @click="moveQuestion(idx, 'up')"
                 >
                   <ChevronUp style="width: 12px; height: 12px;" />
-                </button>
-                <button
-                  class="action-icon"
+                </TsButton>
+                <TsButton
+                  variant="ghost"
+                  size="xs"
+                  class="action-mini-btn"
                   :disabled="idx === questionnaire.questions.length - 1"
                   title="下移"
                   @click="moveQuestion(idx, 'down')"
                 >
                   <ChevronDown style="width: 12px; height: 12px;" />
-                </button>
-                <button class="action-icon" title="复制" @click="duplicateQuestion(idx)">
+                </TsButton>
+                <TsButton
+                  variant="ghost"
+                  size="xs"
+                  class="action-mini-btn"
+                  title="复制"
+                  @click="duplicateQuestion(idx)"
+                >
                   <Copy style="width: 12px; height: 12px;" />
-                </button>
-                <button class="action-icon danger" title="删除" @click="deleteQuestion(idx)">
+                </TsButton>
+                <TsButton
+                  variant="ghost"
+                  size="xs"
+                  class="action-mini-btn btn-danger"
+                  title="删除"
+                  @click="deleteQuestion(idx)"
+                >
                   <Trash2 style="width: 12px; height: 12px;" />
-                </button>
+                </TsButton>
               </div>
             </div>
           </div>
         </aside>
 
-        <!-- 右侧题目属性与逻辑配置区 -->
+        <!-- 右侧题目属性与逻辑配置区 (TsCard + TsInput + TsSelect + TsSwitch) -->
         <section class="inspector-col">
           <div v-if="currentQuestion" class="inspector-wrapper">
             <!-- 题目顶部摘要条 -->
             <div class="detail-header">
               <div class="detail-meta">
                 <span class="detail-q-tag">第 {{ activeQuestionIndex + 1 }} 题</span>
-                <span class="detail-q-id">{{ currentQuestion.id }}</span>
+                <TsBadge variant="neutral" size="md">{{ currentQuestion.id }}</TsBadge>
               </div>
 
               <div class="detail-controls">
                 <div class="ctrl-group">
                   <label>题型：</label>
-                  <select
-                    v-model="currentQuestion.type"
-                    class="studio-select"
-                    @change="markDirty"
-                  >
-                    <option value="single_choice">单选题</option>
-                    <option value="multiple_choice">多选题</option>
-                    <option value="likert_scale">量表评分题</option>
-                    <option value="text_input">开放问答</option>
-                  </select>
+                  <TsSelect
+                    :model-value="currentQuestion.type"
+                    :options="questionTypeOptions"
+                    size="sm"
+                    style="min-width: 180px;"
+                    @update:model-value="handleQuestionTypeChange"
+                  />
                 </div>
 
-                <label class="toggle-box">
-                  <input
-                    type="checkbox"
-                    v-model="currentQuestion.required"
-                    @change="markDirty"
-                  />
-                  <span>必填</span>
-                </label>
+                <TsSwitch
+                  v-model="currentQuestion.required"
+                  size="sm"
+                  label="必填项"
+                  @change="markDirty"
+                />
               </div>
             </div>
 
-            <!-- 基础题干与说明 -->
-            <div class="form-section">
+            <!-- 基础题干与说明 (TsCard) -->
+            <TsCard padding="md" class="config-block">
               <div class="form-row">
                 <label class="row-label">题目标题</label>
-                <input
+                <TsInput
                   v-model="currentQuestion.title"
-                  type="text"
-                  class="studio-input strong"
+                  size="md"
+                  bold
                   placeholder="请输入题目内容..."
-                  @input="markDirty"
+                  @change="markDirty"
                 />
               </div>
 
               <div class="form-row">
                 <label class="row-label">补充说明 (选填)</label>
-                <textarea
+                <TsTextarea
                   v-model="currentQuestion.description"
-                  class="studio-textarea"
-                  rows="2"
+                  :rows="2"
                   placeholder="为受访者补充说明作答背景或提示..."
-                  @input="markDirty"
-                ></textarea>
+                  @change="markDirty"
+                />
               </div>
-            </div>
+            </TsCard>
 
-            <!-- 选项列表 (单选/多选/量表) -->
-            <div
-              v-if="currentQuestion.type !== 'text_input'"
-              class="form-section"
+            <!-- 开放问答专属设置 (TsCard + TsInput) -->
+            <TsCard
+              v-if="currentQuestion.type === 'text_input'"
+              padding="md"
+              class="config-block"
             >
               <div class="section-title-row">
-                <span class="section-title">选项设置</span>
-                <button class="small-btn" @click="addOption">
+                <span class="section-title">问答填空专属设置</span>
+                <TsBadge variant="warning" size="sm">开放文本题</TsBadge>
+              </div>
+              <div class="form-row">
+                <label class="row-label">输入占位提示语 (Placeholder)</label>
+                <TsInput
+                  v-model="currentQuestion.placeholder"
+                  size="sm"
+                  placeholder="例如：请详细阐述您的看法与建议..."
+                  @change="markDirty"
+                />
+              </div>
+            </TsCard>
+
+            <!-- 选项列表 (单选/多选/量表) -->
+            <TsCard
+              v-if="currentQuestion.type !== 'text_input'"
+              padding="md"
+              class="config-block"
+            >
+              <div class="section-title-row">
+                <div class="options-title-group">
+                  <span class="section-title">选项设置</span>
+                  <TsBadge
+                    v-if="currentQuestion.type === 'multiple_choice'"
+                    variant="info"
+                    size="sm"
+                  >
+                    多选题模式
+                  </TsBadge>
+                  <TsBadge
+                    v-else-if="currentQuestion.type === 'likert_scale'"
+                    variant="success"
+                    size="sm"
+                  >
+                    量表评分模式
+                  </TsBadge>
+                </div>
+                <TsButton variant="secondary" size="xs" @click="addOption">
                   <Plus style="width: 12px; height: 12px;" />
                   <span>增加选项</span>
-                </button>
+                </TsButton>
+              </div>
+
+              <!-- 量表题专属快捷预设 -->
+              <div v-if="currentQuestion.type === 'likert_scale'" class="likert-preset-bar">
+                <span class="preset-label">快捷量表模板：</span>
+                <div class="preset-buttons">
+                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('satisfaction')">
+                    5点满意度
+                  </TsButton>
+                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('agreement')">
+                    5点认同度
+                  </TsButton>
+                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('frequency')">
+                    5点频次
+                  </TsButton>
+                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('score')">
+                    5分制
+                  </TsButton>
+                </div>
               </div>
 
               <div class="options-container">
@@ -562,37 +748,36 @@ onMounted(async () => {
                   class="option-item"
                 >
                   <span class="opt-alpha">{{ String.fromCharCode(65 + oIdx) }}</span>
-                  <input
-                    type="text"
-                    :value="typeof opt === 'string' ? opt : opt.label"
-                    class="studio-input opt-text"
+                  <TsInput
+                    :model-value="typeof opt === 'string' ? opt : opt.label"
+                    size="sm"
                     placeholder="输入选项内容..."
-                    @input="(e) => updateOptionText(oIdx, (e.target as HTMLInputElement).value)"
+                    @update:model-value="(val) => updateOptionText(oIdx, val)"
                   />
-                  <button
-                    class="action-icon danger"
+                  <TsButton
+                    variant="ghost"
+                    size="xs"
+                    class="btn-danger"
                     title="删除此选项"
                     @click="removeOption(oIdx)"
                   >
                     <Trash2 style="width: 13px; height: 13px;" />
-                  </button>
+                  </TsButton>
                 </div>
               </div>
-            </div>
+            </TsCard>
 
-            <!-- 可视化跳转流向规则 (Jump Logic) -->
-            <div class="form-section jump-section">
+            <!-- 条件跳转流向规则 (TsCard + TsSelect) -->
+            <TsCard padding="md" highlight class="config-block">
               <div class="section-title-row">
                 <div class="jump-heading">
                   <GitBranch style="width: 15px; height: 15px; color: #4f46e5;" />
                   <span class="section-title">条件跳转流向 (Jump Logic)</span>
                 </div>
-                <div class="jump-actions">
-                  <button class="small-btn" @click="addJumpRule">
-                    <Plus style="width: 12px; height: 12px;" />
-                    <span>添加条件跳转</span>
-                  </button>
-                </div>
+                <TsButton variant="secondary" size="xs" @click="addJumpRule">
+                  <Plus style="width: 12px; height: 12px;" />
+                  <span>添加条件跳转</span>
+                </TsButton>
               </div>
 
               <!-- 未配置跳转规则 -->
@@ -613,23 +798,17 @@ onMounted(async () => {
                   <div class="rule-clause">
                     <div class="when-wrap">
                       <span class="clause-text">若受访者选择</span>
-                      <select
-                        class="studio-select compact"
-                        :value="rule.when ? rule.when[currentQuestion.id] : 0"
-                        @change="(e) => {
+                      <TsSelect
+                        :model-value="rule.when ? rule.when[currentQuestion.id] : 0"
+                        :options="getQuestionOptionChoices()"
+                        size="sm"
+                        style="min-width: 160px;"
+                        @update:model-value="(val) => {
                           if (!rule.when) rule.when = {};
-                          rule.when[currentQuestion.id] = Number((e.target as HTMLSelectElement).value);
+                          rule.when[currentQuestion.id] = Number(val);
                           markDirty();
                         }"
-                      >
-                        <option
-                          v-for="(opt, optI) in currentQuestion.options || []"
-                          :key="optI"
-                          :value="optI"
-                        >
-                          选项 {{ String.fromCharCode(65 + optI) }}: {{ typeof opt === 'string' ? opt : opt.label }}
-                        </option>
-                      </select>
+                      />
                     </div>
                   </div>
 
@@ -637,33 +816,28 @@ onMounted(async () => {
 
                   <div class="rule-dest">
                     <span class="clause-text">跳转至</span>
-                    <select
+                    <TsSelect
                       v-model="rule.to"
-                      class="studio-select compact target"
+                      :options="jumpTargetOptions"
+                      highlight
+                      size="sm"
+                      style="min-width: 180px;"
                       @change="markDirty"
-                    >
-                      <option
-                        v-for="(targetQ, targetI) in questionnaire.questions"
-                        :key="targetQ.id"
-                        :value="targetQ.id"
-                      >
-                        Q{{ targetI + 1 }}: {{ targetQ.title }}
-                      </option>
-                      <option value="end">🏁 正常结束作答 (End)</option>
-                      <option value="exit">🚫 甄别淘汰终止 (Exit)</option>
-                    </select>
+                    />
                   </div>
 
-                  <button
-                    class="action-icon danger"
+                  <TsButton
+                    variant="ghost"
+                    size="xs"
+                    class="btn-danger"
                     title="删除此规则"
                     @click="removeJumpRule(rule)"
                   >
                     <Trash2 style="width: 13px; height: 13px;" />
-                  </button>
+                  </TsButton>
                 </div>
               </div>
-            </div>
+            </TsCard>
           </div>
         </section>
       </div>
@@ -691,7 +865,7 @@ onMounted(async () => {
 
 /* 顶栏 */
 .studio-header {
-  height: 54px;
+  height: 52px;
   background: #ffffff;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   display: flex;
@@ -707,38 +881,10 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.back-link {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  background: #f1f5f9;
-  color: #475569;
-  text-decoration: none;
-  transition: all 0.15s;
-}
-
-.back-link:hover {
-  background: #e2e8f0;
-  color: #0f172a;
-}
-
 .brand-group {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.brand-tag {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.68rem;
-  font-weight: 800;
-  background: #eef2ff;
-  color: #4f46e5;
-  padding: 2px 5px;
-  border-radius: 4px;
 }
 
 .brand-name {
@@ -783,118 +929,15 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 
-.title-input {
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: #0f172a;
-  border: 1px solid #4f46e5;
-  border-radius: 6px;
-  padding: 3px 8px;
-  outline: none;
-  background: #ffffff;
-}
-
-/* 切换器 */
 .header-center {
   display: flex;
   align-items: center;
 }
 
-.segmented-control {
-  display: flex;
-  align-items: center;
-  background: #f1f5f9;
-  border-radius: 8px;
-  padding: 3px;
-  gap: 2px;
-}
-
-.segment-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #64748b;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.segment-btn:hover {
-  color: #0f172a;
-}
-
-.segment-btn.active {
-  background: #ffffff;
-  color: #4f46e5;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-}
-
-/* 右侧 */
 .header-right {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.survey-select {
-  height: 30px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 6px;
-  padding: 0 8px;
-  font-size: 0.78rem;
-  background: #ffffff;
-  color: #334155;
-  outline: none;
-  cursor: pointer;
-}
-
-.save-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #ffffff;
-  color: #475569;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.save-btn.is-dirty {
-  background: #4f46e5;
-  border-color: #4f46e5;
-  color: #ffffff;
-  box-shadow: 0 2px 5px rgba(79, 70, 229, 0.25);
-}
-
-.preview-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #f8fafc;
-  color: #334155;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.15s;
-}
-
-.preview-link:hover {
-  background: #e2e8f0;
-  color: #0f172a;
 }
 
 /* 工作区 */
@@ -915,20 +958,9 @@ onMounted(async () => {
   font-size: 0.9rem;
 }
 
-.empty-back-btn {
-  margin-top: 8px;
-  padding: 6px 14px;
-  background: #4f46e5;
-  color: #ffffff;
-  border-radius: 6px;
-  text-decoration: none;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
-
 .spinner {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border: 3px solid rgba(79, 70, 229, 0.2);
   border-top-color: #4f46e5;
   border-radius: 50%;
@@ -946,7 +978,7 @@ onMounted(async () => {
   height: 100%;
 }
 
-/* 经典双栏大纲与属性编辑器 */
+/* 双栏模式 */
 .editor-stage {
   display: grid;
   grid-template-columns: 290px 1fr;
@@ -981,33 +1013,6 @@ onMounted(async () => {
   color: #0f172a;
 }
 
-.outline-badge {
-  font-size: 0.72rem;
-  background: #f1f5f9;
-  color: #64748b;
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-
-.add-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: #eef2ff;
-  border: 1px solid rgba(79, 70, 229, 0.25);
-  border-radius: 6px;
-  color: #4f46e5;
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.add-btn:hover {
-  background: #e0e7ff;
-}
-
 .outline-body {
   flex: 1;
   overflow-y: auto;
@@ -1021,7 +1026,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid transparent;
   cursor: pointer;
@@ -1051,35 +1056,6 @@ onMounted(async () => {
   color: #475569;
 }
 
-.node-type {
-  font-size: 0.68rem;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.node-type.single_choice {
-  background: #eef2ff;
-  color: #4f46e5;
-}
-
-.node-type.multiple_choice {
-  background: #e0f2fe;
-  color: #0284c7;
-}
-
-.node-type.likert_scale {
-  background: #ecfdf5;
-  color: #059669;
-}
-
-.node-type.text_input {
-  background: #faf5ff;
-  color: #9333ea;
-}
-
 .node-title {
   font-size: 0.8rem;
   color: #1e293b;
@@ -1087,7 +1063,7 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 120px;
+  max-width: 110px;
 }
 
 .node-actions {
@@ -1102,33 +1078,18 @@ onMounted(async () => {
   margin-right: 2px;
 }
 
-.action-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: transparent;
-  border-radius: 4px;
-  color: #94a3b8;
-  cursor: pointer;
-  transition: all 0.12s;
+.action-mini-btn {
+  padding: 0 4px !important;
+  height: 22px !important;
+  color: #94a3b8 !important;
 }
 
-.action-icon:hover:not(:disabled) {
-  background: #e2e8f0;
-  color: #0f172a;
+.action-mini-btn:hover {
+  color: #0f172a !important;
 }
 
-.action-icon.danger:hover:not(:disabled) {
-  background: #fee2e2;
-  color: #ef4444;
-}
-
-.action-icon:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.btn-danger:hover {
+  color: #dc2626 !important;
 }
 
 /* 右侧属性面板 */
@@ -1167,15 +1128,6 @@ onMounted(async () => {
   color: #0f172a;
 }
 
-.detail-q-id {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  background: #e2e8f0;
-  color: #475569;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
 .detail-controls {
   display: flex;
   align-items: center;
@@ -1190,29 +1142,10 @@ onMounted(async () => {
   color: #475569;
 }
 
-.toggle-box {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: #334155;
-  cursor: pointer;
-}
-
-.form-section {
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 10px;
-  padding: 16px 18px;
+.config-block {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.form-section.jump-section {
-  border-color: rgba(79, 70, 229, 0.25);
-  background: #fafbff;
 }
 
 .section-title-row {
@@ -1239,81 +1172,35 @@ onMounted(async () => {
   color: #475569;
 }
 
-.studio-input {
-  height: 34px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 6px;
-  padding: 0 10px;
-  font-size: 0.85rem;
-  color: #0f172a;
-  outline: none;
-  background: #ffffff;
-  transition: border-color 0.15s;
-}
-
-.studio-input.strong {
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.studio-input:focus {
-  border-color: #4f46e5;
-}
-
-.studio-textarea {
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 0.82rem;
-  color: #0f172a;
-  outline: none;
-  resize: vertical;
-  background: #ffffff;
-}
-
-.studio-textarea:focus {
-  border-color: #4f46e5;
-}
-
-.studio-select {
-  height: 30px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 6px;
-  padding: 0 8px;
-  font-size: 0.8rem;
-  background: #ffffff;
-  color: #334155;
-  outline: none;
-  cursor: pointer;
-}
-
-.studio-select.compact {
-  height: 28px;
-  font-size: 0.78rem;
-}
-
-.studio-select.target {
-  border-color: #4f46e5;
-  color: #4f46e5;
-  font-weight: 600;
-}
-
-.small-btn {
-  display: inline-flex;
+.options-title-group {
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: #ffffff;
-  color: #475569;
+  gap: 8px;
+}
+
+.likert-preset-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed rgba(15, 23, 42, 0.12);
+  margin-bottom: 6px;
+}
+
+.preset-label {
   font-size: 0.75rem;
   font-weight: 600;
-  cursor: pointer;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.small-btn:hover {
-  background: #f1f5f9;
+.preset-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .options-container {
@@ -1337,17 +1224,7 @@ onMounted(async () => {
   text-align: center;
 }
 
-.opt-text {
-  flex: 1;
-}
-
 .jump-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.jump-actions {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1375,7 +1252,7 @@ onMounted(async () => {
   padding: 6px 10px;
   background: #ffffff;
   border: 1px solid rgba(79, 70, 229, 0.15);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 .rule-clause {
@@ -1416,7 +1293,7 @@ onMounted(async () => {
   border: 1px solid rgba(16, 185, 129, 0.3);
   color: #065f46;
   padding: 8px 16px;
-  border-radius: 6px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   gap: 8px;

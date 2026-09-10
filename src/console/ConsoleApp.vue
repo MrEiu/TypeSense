@@ -23,14 +23,15 @@ import {
   FileQuestion,
   Sparkles,
   Search,
-  BarChart3,
   RefreshCw,
+  Plus,
 } from 'lucide-vue-next';
 
 import {
   QuestionnaireRepositoryService,
   type SurveyMetadataItem,
 } from '../services/questionnaire-repository-service';
+import { TsButton } from '../components/ui';
 
 // 子功能组件
 import SurveyFilterToolbar from './components/SurveyFilterToolbar.vue';
@@ -95,11 +96,6 @@ const menuOptions: MenuOption[] = [
     label: '问卷资产管理',
     key: 'all_surveys',
     icon: renderIcon(FileQuestion),
-  },
-  {
-    label: 'AI 智造工坊',
-    key: 'ai_studio',
-    icon: renderIcon(Sparkles),
   },
 ];
 
@@ -310,14 +306,14 @@ onMounted(() => {
               </NTag>
             </div>
 
-            <!-- 顶栏搜索与操作区 -->
+            <!-- 顶栏搜索与操作区 (含新建问卷) -->
             <div style="display: flex; align-items: center; gap: 12px;">
               <NInput
                 v-model:value="searchQuery"
                 placeholder="搜索问卷标题或短码..."
                 clearable
                 size="small"
-                style="width: 260px;"
+                style="width: 240px;"
               >
                 <template #prefix>
                   <Search style="width: 14px; height: 14px; color: #94a3b8;" />
@@ -334,6 +330,17 @@ onMounted(() => {
                 </template>
                 重新从 SQLite 数据库同步
               </NTooltip>
+
+              <!-- 新建问卷按钮 (唤起 AI 智造工坊) -->
+              <TsButton
+                variant="primary"
+                size="sm"
+                title="创建新问卷 (AI 智造工坊)"
+                @click="isAiStudioOpen = true"
+              >
+                <Sparkles style="width: 13px; height: 13px;" />
+                <span>新建问卷</span>
+              </TsButton>
             </div>
           </NLayoutHeader>
 

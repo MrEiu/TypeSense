@@ -155,7 +155,7 @@ const tableColumns: DataTableColumns<SurveyMetadataItem> = [
             secondary: true,
             type: 'warning',
             tag: 'a',
-            href: `/admin.html?id=${encodeURIComponent(row.slug || row.id)}`,
+            href: `/studio.html?id=${encodeURIComponent(row.slug || row.id)}`,
             target: '_blank',
           },
           { default: () => '编排' }

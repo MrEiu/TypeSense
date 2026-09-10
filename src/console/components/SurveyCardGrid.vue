@@ -3,11 +3,6 @@ import { ref } from 'vue';
 import {
   NGrid,
   NGridItem,
-  NCard,
-  NTag,
-  NSwitch,
-  NSpace,
-  NButton,
   NDropdown,
   NTooltip,
 } from 'naive-ui';
@@ -22,6 +17,7 @@ import {
   Layers,
 } from 'lucide-vue-next';
 import type { SurveyMetadataItem } from '../../services/questionnaire-repository-service';
+import { TsButton, TsBadge, TsSwitch } from '../../components/ui';
 
 defineProps<{
   surveys: SurveyMetadataItem[];
@@ -88,23 +84,22 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
   <NGrid :cols="2" :x-gap="18" :y-gap="18">
     <NGridItem v-for="item in surveys" :key="item.id">
       <div class="studio-survey-card">
-        <!-- 卡片头部：状态开关与发布日期 -->
+        <!-- 卡片头部：状态开关与发布日期 (TsSwitch + TsBadge) -->
         <div class="card-header-row">
           <div class="status-indicator-group">
-            <NSwitch
-              size="small"
-              :value="item.status !== 'paused'"
-              @update:value="(val) => emit('toggle-status', item, val)"
+            <TsSwitch
+              size="sm"
+              :model-value="item.status !== 'paused'"
+              @update:model-value="(val) => emit('toggle-status', item, val)"
             />
-            <div
-              class="status-capsule"
-              :class="item.status !== 'paused' ? 'is-active' : 'is-paused'"
+            <TsBadge
+              :variant="item.status !== 'paused' ? 'success' : 'warning'"
+              size="sm"
+              dot
+              :pulse="item.status !== 'paused'"
             >
-              <span class="status-dot"></span>
-              <span class="status-label">
-                {{ item.status !== 'paused' ? '收集中' : '已暂停' }}
-              </span>
-            </div>
+              {{ item.status !== 'paused' ? '收集中' : '已暂停' }}
+            </TsBadge>
           </div>
 
           <div class="meta-date">
@@ -122,22 +117,22 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
             {{ item.description || '暂无说明，包含分支流向与动态条件计算。' }}
           </p>
 
-          <!-- 属性微徽章池 -->
+          <!-- 属性微徽章池 (TsBadge) -->
           <div class="badge-pill-row">
             <!-- 题数 -->
-            <span class="metric-pill">
+            <TsBadge variant="neutral" size="sm">
               <strong>{{ item.questionsCount }}</strong> 题
-            </span>
+            </TsBadge>
 
             <!-- 作答数 -->
-            <span
-              class="metric-pill"
-              :class="(item.responseCount || 0) > 0 ? 'highlight-responses' : ''"
+            <TsBadge
+              :variant="(item.responseCount || 0) > 0 ? 'success' : 'neutral'"
+              size="sm"
             >
               <strong>{{ item.responseCount || 0 }}</strong> 份作答
-            </span>
+            </TsBadge>
 
-            <!-- 算法短码 (支持点击即时复制) -->
+            <!-- 算法短码 (支持点击一键复制) -->
             <NTooltip trigger="hover">
               <template #trigger>
                 <button class="slug-copy-pill" @click="handleCopySlug(item)">
@@ -154,61 +149,67 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
           </div>
         </div>
 
-        <!-- 卡片底部：操作按键组 (发布、数据、体验、编排) -->
+        <!-- 卡片底部：操作按键组 (TsButton: 发布、数据、体验、编排) -->
         <div class="card-footer-actions">
           <div class="main-action-buttons">
-            <!-- 1. 发布 (短链与二维码分发) -->
-            <button
-              class="action-btn-item action-btn-publish"
+            <!-- 1. 发布 -->
+            <TsButton
+              variant="secondary"
+              size="sm"
               title="查看问卷分发短链与扫码二维码"
               @click="emit('open-detail', item)"
             >
               <Share2 style="width: 13px; height: 13px; color: #4f46e5;" />
               <span>发布</span>
-            </button>
+            </TsButton>
 
-            <!-- 2. 数据 (作答看板与答卷流水) -->
-            <button
-              class="action-btn-item action-btn-data"
+            <!-- 2. 数据 -->
+            <TsButton
+              variant="secondary"
+              size="sm"
               title="查看问卷作答流水与统计数据"
               @click="emit('open-responses', item)"
             >
               <BarChart3 style="width: 13px; height: 13px; color: #0284c7;" />
               <span>数据</span>
-            </button>
+            </TsButton>
 
-            <!-- 3. 体验 (受访端真实作答) -->
-            <a
+            <!-- 3. 体验 -->
+            <TsButton
+              as="a"
               :href="`/survey.html?id=${encodeURIComponent(item.slug || item.id)}`"
               target="_blank"
-              class="action-btn-item action-btn-experience"
+              variant="secondary"
+              size="sm"
               title="在受访端新窗口体验真实作答流程"
             >
               <ExternalLink style="width: 13px; height: 13px; color: #10b981;" />
               <span>体验</span>
-            </a>
+            </TsButton>
 
-            <!-- 4. 编排 (智能工作台) -->
-            <a
-              :href="`/admin.html?id=${encodeURIComponent(item.slug || item.id)}`"
+            <!-- 4. 编排 -->
+            <TsButton
+              as="a"
+              :href="`/studio.html?id=${encodeURIComponent(item.slug || item.id)}`"
               target="_blank"
-              class="action-btn-item action-btn-orchestrate"
+              variant="secondary"
+              size="sm"
               title="进入 TypeSense Studio 问卷逻辑与智能编排工作台"
             >
               <Layers style="width: 13px; height: 13px; color: #8b5cf6;" />
               <span>编排</span>
-            </a>
+            </TsButton>
           </div>
 
-          <!-- 更多菜单 -->
+          <!-- 更多菜单 (TsButton) -->
           <NDropdown
             trigger="click"
             :options="getDropdownOptions()"
             @select="(key) => handleDropdownSelect(key, item)"
           >
-            <button class="more-menu-btn" title="更多操作">
+            <TsButton variant="ghost" size="icon" class="more-menu-btn" title="更多操作">
               <MoreHorizontal style="width: 14px; height: 14px;" />
-            </button>
+            </TsButton>
           </NDropdown>
         </div>
       </div>
@@ -249,52 +250,7 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
 .status-indicator-group {
   display: flex;
   align-items: center;
-  gap: 10px;
-}
-
-.status-capsule {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 9px;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1.4;
-  user-select: none;
-}
-
-.status-capsule.is-active {
-  background: #ecfdf5;
-  color: #059669;
-}
-
-.status-capsule.is-paused {
-  background: #fffbeb;
-  color: #d97706;
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.status-capsule.is-active .status-dot {
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
-  animation: pulse-glow 2s infinite ease-in-out;
-}
-
-@keyframes pulse-glow {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.3);
-    opacity: 0.6;
-  }
+  gap: 8px;
 }
 
 .meta-date {
@@ -344,43 +300,17 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
   gap: 8px;
 }
 
-.metric-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  background: #f1f5f9;
-  color: #475569;
-  border-radius: 6px;
-  font-size: 0.78rem;
-  font-weight: 500;
-}
-
-.metric-pill strong {
-  color: #1e293b;
-  font-weight: 700;
-}
-
-.metric-pill.highlight-responses {
-  background: #ecfdf5;
-  color: #059669;
-}
-
-.metric-pill.highlight-responses strong {
-  color: #047857;
-}
-
 .slug-copy-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 8px;
+  padding: 2px 7px;
   background: #f8fafc;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 6px;
+  border-radius: 9999px;
   color: #64748b;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   cursor: pointer;
   transition: all 0.15s ease;
   outline: none;
@@ -408,74 +338,14 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
   flex-wrap: wrap;
 }
 
-/* 统一精致操作按钮规范 */
-.action-btn-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 11px;
-  border-radius: 8px;
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.09);
-  color: #334155;
-  font-size: 0.81rem;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
-  transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
-  user-select: none;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
-}
-
-.action-btn-item:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 3px 6px -1px rgba(15, 23, 42, 0.08);
-}
-
-/* 1. 发布按钮 */
-.action-btn-publish:hover {
-  background: #eef2ff;
-  border-color: rgba(79, 70, 229, 0.35);
-  color: #4338ca;
-}
-
-/* 2. 数据按钮 */
-.action-btn-data:hover {
-  background: #f0f9ff;
-  border-color: rgba(2, 132, 199, 0.35);
-  color: #0369a1;
-}
-
-/* 3. 体验按钮 */
-.action-btn-experience:hover {
-  background: #ecfdf5;
-  border-color: rgba(16, 185, 129, 0.35);
-  color: #047857;
-}
-
-/* 4. 编排按钮 */
-.action-btn-orchestrate:hover {
-  background: #faf5ff;
-  border-color: rgba(139, 92, 246, 0.35);
-  color: #6d28d9;
-}
-
 .more-menu-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  color: #94a3b8;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  color: #94a3b8 !important;
+  width: 28px !important;
+  height: 28px !important;
 }
 
 .more-menu-btn:hover {
-  background: #f1f5f9;
-  color: #1e293b;
+  color: #0f172a !important;
+  background: #f1f5f9 !important;
 }
 </style>

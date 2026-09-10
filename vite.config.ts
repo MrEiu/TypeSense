@@ -28,6 +28,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         survey: resolve(__dirname, 'survey.html'),
+        studio: resolve(__dirname, 'studio.html'),
         admin: resolve(__dirname, 'admin.html'),
       },
     },
