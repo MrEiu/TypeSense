@@ -13,11 +13,13 @@ import type { QuestionnaireModel, QuestionItemModel } from '../schema/questionna
 import { QuestionnaireRepositoryService } from '../services/questionnaire-repository-service';
 import { QuestionnaireFlowEngine, type FlowStepState } from '../engine/flow-engine';
 import { DraftStorageService, type SurveyDraftData } from '../services/draft-storage-service';
+import { AuthClientService, type UserProfile } from '../services/auth-client-service';
 
 import WelcomeCard from './components/WelcomeCard.vue';
 import QuestionStage from './components/QuestionStage.vue';
 import CompletionCard from './components/CompletionCard.vue';
 import DisqualifiedCard from './components/DisqualifiedCard.vue';
+import AuthModal from '../components/auth/AuthModal.vue';
 
 // Naive UI Zen Paper 极简书卷主题定制
 const themeOverrides: GlobalThemeOverrides = {
@@ -37,6 +39,8 @@ const themeOverrides: GlobalThemeOverrides = {
 };
 
 // 状态定义
+const currentUser = ref<UserProfile | null>(AuthClientService.getUser());
+const showAuthModal = ref(false);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const survey = ref<QuestionnaireModel | null>(null);
@@ -151,6 +155,10 @@ async function initSurvey() {
 
 // 恢复草稿并继续答题
 function handleResumeDraft() {
+  if (!AuthClientService.isLoggedIn()) {
+    showAuthModal.value = true;
+    return;
+  }
   if (!existingDraft.value || !survey.value) return;
   const draft = existingDraft.value;
   answersMap.value = { ...draft.answers };
@@ -190,8 +198,12 @@ function handleUpdateAnswer(val: unknown) {
   }
 }
 
-// 开始答题
+// 开始答题（严格校验已登录状态）
 function handleStart() {
+  if (!AuthClientService.isLoggedIn()) {
+    showAuthModal.value = true;
+    return;
+  }
   if (!engine) return;
   const step = engine.getCurrentStep();
   currentStep.value = step;
@@ -199,6 +211,22 @@ function handleStart() {
     currentAnswer.value = answersMap.value[step.currentQuestion.id];
   }
   stage.value = 'question';
+}
+
+// 鉴权登录成功回调
+function onAuthSuccess(user: UserProfile) {
+  currentUser.value = user;
+  showAuthModal.value = false;
+  // 若仍停留在欢迎界面，登录完成后顺畅自动开启答卷
+  if (stage.value === 'welcome') {
+    handleStart();
+  }
+}
+
+// 退出受访账号
+function handleUserLogout() {
+  AuthClientService.logout();
+  currentUser.value = null;
 }
 
 // 检查当前题目必填校验
@@ -284,6 +312,8 @@ async function submitFinalResponse(status: 'completed' | 'disqualified') {
       answers: answersMap.value,
       status,
       linkCode,
+      username: currentUser.value?.username || 'anonymous',
+      userId: currentUser.value?.id || '',
     });
 
     if (res.success && res.id) {
@@ -367,13 +397,20 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+const handleAuthChange = (e: Event) => {
+  const customEvt = e as CustomEvent<UserProfile | null>;
+  currentUser.value = customEvt.detail;
+};
+
 onMounted(() => {
   initSurvey();
   window.addEventListener('keydown', handleGlobalKeydown);
+  window.addEventListener('typesense:auth-changed', handleAuthChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown);
+  window.removeEventListener('typesense:auth-changed', handleAuthChange);
 });
 </script>
 
@@ -387,6 +424,31 @@ onUnmounted(() => {
             <div class="progress-fill" :style="{ width: `${progressPercentage}%` }"></div>
           </div>
         </div>
+
+        <!-- 顶部温润受访者导航条 -->
+        <header class="responder-nav-bar">
+          <div class="nav-brand">
+            <span class="brand-spark">⚡</span>
+            <span class="brand-title">TypeSense</span>
+          </div>
+
+          <div class="nav-user-area">
+            <template v-if="currentUser">
+              <div class="user-badge">
+                <span class="user-indicator"></span>
+                <span class="user-name">当前受访者：<strong>{{ currentUser.username }}</strong></span>
+                <button class="user-btn-ghost" @click="handleUserLogout" title="退出并切换账号">
+                  退出
+                </button>
+              </div>
+            </template>
+            <template v-else>
+              <button class="user-login-cta" @click="showAuthModal = true">
+                登录 / 注册受访者账号
+              </button>
+            </template>
+          </div>
+        </header>
 
         <!-- 骨架加载态 -->
         <div v-if="loading" class="state-center-box">
@@ -511,6 +573,14 @@ onUnmounted(() => {
             </button>
           </div>
         </nav>
+
+        <!-- 受访者身份登录 / 注册弹窗 -->
+        <AuthModal
+          v-model:show="showAuthModal"
+          mode="user"
+          :closable="true"
+          @success="onAuthSuccess"
+        />
       </div>
     </NMessageProvider>
   </NConfigProvider>
@@ -524,6 +594,113 @@ onUnmounted(() => {
   background-color: var(--zen-bg);
   position: relative;
   overflow-x: hidden;
+}
+
+/* 顶部受访者导航条 */
+.responder-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+  position: relative;
+  z-index: 50;
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-spark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: #4f46e5;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.3);
+}
+
+.brand-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.nav-user-area {
+  display: flex;
+  align-items: center;
+}
+
+.user-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.user-indicator {
+  width: 7px;
+  height: 7px;
+  background: #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.user-name {
+  font-size: 0.84rem;
+  color: #475569;
+}
+
+.user-name strong {
+  color: #0f172a;
+}
+
+.user-btn-ghost {
+  background: transparent;
+  border: none;
+  font-size: 0.8rem;
+  color: #64748b;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.user-btn-ghost:hover {
+  background: #f1f5f9;
+  color: #dc2626;
+}
+
+.user-login-cta {
+  background: #4f46e5;
+  color: #ffffff;
+  border: none;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+}
+
+.user-login-cta:hover {
+  background: #4338ca;
+  transform: translateY(-1px);
 }
 
 /* 顶部进度条 */

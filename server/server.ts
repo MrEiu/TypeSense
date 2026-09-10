@@ -22,6 +22,7 @@ import { AiGeneratorService } from './ai-generator-service';
 import { ConcurrentPipelineService } from './concurrent-pipeline-service';
 import { ConfigService } from './config-service';
 import { TemplateService } from './template-service';
+import { AuthService, DEFAULT_ADMINS } from './auth-service';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,8 +34,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// 初始化种子问卷
+// 初始化种子问卷与默认管理员账号
 SurveyService.initSeedSurveys();
+AuthService.initAdminAccounts();
 
 // ==================== 问卷管理接口 ====================
 
@@ -198,11 +200,13 @@ app.get('/s/:code', (req: Request, res: Response) => {
  */
 app.post('/api/surveys/:id/responses', (req: Request, res: Response) => {
   try {
-    const { answers, status, linkCode } = req.body || {};
+    const { answers, status, linkCode, username, userId } = req.body || {};
     const result = ResponseService.saveResponse(req.params.id, {
       answers: answers || {},
       status: status || 'completed',
       linkCode,
+      username,
+      userId,
     });
     if (!result.success) {
       res.status(400).json(result);
@@ -213,6 +217,86 @@ app.post('/api/surveys/:id/responses', (req: Request, res: Response) => {
     console.error('[API] saveResponse 异常:', err);
     res.status(500).json({ error: '答卷入库失败' });
   }
+});
+
+// ==================== 账户认证与授权接口 ====================
+
+/**
+ * 账号密码登录
+ */
+app.post('/api/auth/login', (req: Request, res: Response) => {
+  try {
+    const { username, password } = req.body || {};
+    const result = AuthService.login(username, password);
+    if (!result.success) {
+      res.status(401).json({ success: false, error: result.error });
+      return;
+    }
+    res.json({ success: true, user: result.user, token: result.token });
+  } catch (err: any) {
+    console.error('[API] login 异常:', err);
+    res.status(500).json({ success: false, error: '登录处理异常' });
+  }
+});
+
+/**
+ * 普通成员自主注册
+ */
+app.post('/api/auth/register', (req: Request, res: Response) => {
+  try {
+    const { username, password } = req.body || {};
+    const result = AuthService.register(username, password);
+    if (!result.success) {
+      res.status(400).json({ success: false, error: result.error });
+      return;
+    }
+    res.json({ success: true, user: result.user, token: result.token });
+  } catch (err: any) {
+    console.error('[API] register 异常:', err);
+    res.status(500).json({ success: false, error: '注册处理异常' });
+  }
+});
+
+/**
+ * 获取当前登录用户信息
+ */
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : (req.query.token as string);
+
+    if (!token) {
+      res.status(401).json({ success: false, error: '未登录' });
+      return;
+    }
+
+    const user = AuthService.verifyToken(token);
+    if (!user) {
+      res.status(401).json({ success: false, error: '会话已过期或无效' });
+      return;
+    }
+
+    res.json({ success: true, user });
+  } catch (err: any) {
+    console.error('[API] auth/me 异常:', err);
+    res.status(500).json({ success: false, error: '会话校验失败' });
+  }
+});
+
+/**
+ * 获取系统默认管理员提示信息（用于辅助提示）
+ */
+app.get('/api/auth/default-admins', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    admins: DEFAULT_ADMINS.map((a) => ({
+      username: a.username,
+      defaultPassword: a.defaultPassword,
+      description: a.description,
+    })),
+  });
 });
 
 /**

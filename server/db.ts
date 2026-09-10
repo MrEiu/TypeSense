@@ -64,11 +64,24 @@ db.exec(`
     link_code TEXT,
     status TEXT NOT NULL,
     answers_json TEXT NOT NULL,
+    username TEXT,
+    user_id TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (survey_id) REFERENCES surveys(id) ON DELETE CASCADE
   );
 
   CREATE INDEX IF NOT EXISTS idx_survey_responses_survey ON survey_responses(survey_id);
+
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
   CREATE TABLE IF NOT EXISTS uploaded_documents (
     id TEXT PRIMARY KEY,
@@ -101,4 +114,17 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_ai_sessions_created ON ai_generation_sessions(created_at DESC);
 `);
+
+// 结构平滑迁移支持
+try {
+  db.exec('ALTER TABLE survey_responses ADD COLUMN username TEXT;');
+} catch {
+  // column already exists
+}
+try {
+  db.exec('ALTER TABLE survey_responses ADD COLUMN user_id TEXT;');
+} catch {
+  // column already exists
+}
+
 

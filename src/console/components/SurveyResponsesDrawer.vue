@@ -39,6 +39,8 @@ interface ResponseItem {
   status: string;
   createdAt: string;
   linkCode?: string;
+  username?: string;
+  userId?: string;
 }
 
 const loading = ref(false);
@@ -101,10 +103,25 @@ const columns: DataTableColumns<ResponseItem> = [
   {
     title: '答卷 ID / 序号',
     key: 'id',
-    width: 140,
+    width: 130,
     ellipsis: { tooltip: true },
     render(row) {
       return row.id.length > 12 ? `${row.id.substring(0, 10)}...` : row.id;
+    },
+  },
+  {
+    title: '受访用户',
+    key: 'username',
+    width: 120,
+    render(row) {
+      if (!row.username || row.username === 'anonymous') {
+        return h(NTag, { size: 'tiny', bordered: false, round: true }, { default: () => '匿名用户' });
+      }
+      return h(
+        'span',
+        { style: { fontWeight: 600, color: '#334155' } },
+        row.username
+      );
     },
   },
   {
@@ -123,7 +140,7 @@ const columns: DataTableColumns<ResponseItem> = [
   {
     title: '提交时间',
     key: 'createdAt',
-    width: 170,
+    width: 160,
     render(row) {
       try {
         return new Date(row.createdAt).toLocaleString();
@@ -135,7 +152,7 @@ const columns: DataTableColumns<ResponseItem> = [
   {
     title: '作答题数',
     key: 'answers',
-    width: 100,
+    width: 90,
     render(row) {
       const keys = Object.keys(row.answers || {});
       return `${keys.length} 项`;
@@ -170,11 +187,13 @@ function exportCsv() {
   responses.value.forEach((r) => {
     Object.keys(r.answers || {}).forEach((k) => allQuestionKeys.add(k));
   });
-  const headers = ['答卷ID', '状态', '提交时间', '短链渠道', ...Array.from(allQuestionKeys)];
+  const headers = ['答卷ID', '受访用户', '用户ID', '状态', '提交时间', '短链渠道', ...Array.from(allQuestionKeys)];
 
   const rows = responses.value.map((r) => {
     const base = [
       r.id,
+      r.username || '匿名用户',
+      r.userId || '',
       r.status || 'completed',
       r.createdAt || '',
       r.linkCode || '',
@@ -332,7 +351,7 @@ function exportJson() {
           @close="selectedResponse = null"
         >
           <div style="margin-bottom: 10px; font-size: 0.85rem; color: #64748b;">
-            答卷 ID: <strong>{{ selectedResponse.id }}</strong> · 提交于 {{ new Date(selectedResponse.createdAt).toLocaleString() }}
+            答卷 ID: <strong>{{ selectedResponse.id }}</strong> · 受访者: <strong style="color: #4f46e5;">{{ selectedResponse.username || '匿名用户' }}</strong> · 提交于 {{ new Date(selectedResponse.createdAt).toLocaleString() }}
           </div>
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div

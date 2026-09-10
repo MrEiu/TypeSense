@@ -25,12 +25,15 @@ import {
   Search,
   RefreshCw,
   Plus,
+  ShieldCheck,
+  LogOut,
 } from 'lucide-vue-next';
 
 import {
   QuestionnaireRepositoryService,
   type SurveyMetadataItem,
 } from '../services/questionnaire-repository-service';
+import { AuthClientService, type UserProfile } from '../services/auth-client-service';
 import { TsButton } from '../components/ui';
 
 // 子功能组件
@@ -41,6 +44,7 @@ import SurveyPublishModal from './components/SurveyPublishModal.vue';
 import SurveyResponsesDrawer from './components/SurveyResponsesDrawer.vue';
 import SurveyDetailDrawer from './components/SurveyDetailDrawer.vue';
 import AiSurveyStudioModal from './components/AiSurveyStudioModal.vue';
+import AuthModal from '../components/auth/AuthModal.vue';
 
 // 严格遵循原有 Zen Paper 浅色主题配置
 const themeOverrides: GlobalThemeOverrides = {
@@ -68,6 +72,8 @@ const themeOverrides: GlobalThemeOverrides = {
 };
 
 // 状态定义
+const currentUser = ref<UserProfile | null>(AuthClientService.getUser());
+const showAuthModal = ref(!AuthClientService.isAdmin());
 const surveys = ref<SurveyMetadataItem[]>([]);
 const loading = ref(true);
 const isPublishModalOpen = ref(false);
@@ -210,8 +216,35 @@ async function handleDeleteSurvey(survey: SurveyMetadataItem) {
   }
 }
 
-onMounted(() => {
+// 管理员登录成功回调
+function onAdminLoginSuccess(user: UserProfile) {
+  currentUser.value = user;
+  showAuthModal.value = false;
   loadSurveys();
+}
+
+// 退出管理登录
+function handleLogout() {
+  AuthClientService.logout();
+  currentUser.value = null;
+  showAuthModal.value = true;
+}
+
+onMounted(() => {
+  if (AuthClientService.isAdmin()) {
+    loadSurveys();
+  } else {
+    showAuthModal.value = true;
+  }
+
+  const handleAuthChange = (e: Event) => {
+    const customEvt = e as CustomEvent<UserProfile | null>;
+    currentUser.value = customEvt.detail;
+    if (!AuthClientService.isAdmin()) {
+      showAuthModal.value = true;
+    }
+  };
+  window.addEventListener('typesense:auth-changed', handleAuthChange);
 });
 </script>
 
@@ -341,6 +374,37 @@ onMounted(() => {
                 <Sparkles style="width: 13px; height: 13px;" />
                 <span>新建问卷</span>
               </TsButton>
+
+              <!-- 管理员身份状态与安全登出 -->
+              <div
+                v-if="currentUser && currentUser.role === 'admin'"
+                style="
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                  margin-left: 8px;
+                  padding-left: 12px;
+                  border-left: 1px solid rgba(15, 23, 42, 0.08);
+                "
+              >
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <ShieldCheck style="width: 16px; height: 16px; color: #10b981;" />
+                  <span style="font-size: 0.85rem; font-weight: 600; color: #334155;">
+                    {{ currentUser.username }}
+                  </span>
+                  <NTag size="tiny" type="success" :bordered="false" round>管理员</NTag>
+                </div>
+                <NTooltip trigger="hover">
+                  <template #trigger>
+                    <NButton size="small" quaternary @click="handleLogout">
+                      <template #icon>
+                        <LogOut style="width: 14px; height: 14px; color: #64748b;" />
+                      </template>
+                    </NButton>
+                  </template>
+                  退出管理登录
+                </NTooltip>
+              </div>
             </div>
           </NLayoutHeader>
 
@@ -427,6 +491,14 @@ onMounted(() => {
 
         <!-- 弹窗 4：AI 问卷智造工坊 Modal -->
         <AiSurveyStudioModal v-model:show="isAiStudioOpen" @created="loadSurveys" />
+
+        <!-- 管理员登录鉴权弹窗 (访问控制台强校验) -->
+        <AuthModal
+          v-model:show="showAuthModal"
+          mode="admin"
+          :closable="AuthClientService.isAdmin()"
+          @success="onAdminLoginSuccess"
+        />
       </NLayout>
     </NMessageProvider>
   </NConfigProvider>

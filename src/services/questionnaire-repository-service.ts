@@ -195,7 +195,13 @@ export class QuestionnaireRepositoryService {
    */
   public static async submitResponse(
     surveyId: string,
-    payload: { answers: Record<string, unknown>; status?: 'completed' | 'disqualified'; linkCode?: string }
+    payload: {
+      answers: Record<string, unknown>;
+      status?: 'completed' | 'disqualified';
+      linkCode?: string;
+      username?: string;
+      userId?: string;
+    }
   ): Promise<{ success: boolean; id?: string }> {
     try {
       const resp = await fetch(`/api/surveys/${encodeURIComponent(surveyId)}/responses`, {

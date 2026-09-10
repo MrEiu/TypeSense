@@ -37,3 +37,9 @@ export function generateSessionId(): string {
   return `ses_${generateSessionUid()}`;
 }
 
+// 用户账号全局主键算法生成器 (以 usr_ 开头)
+const generateUserUid = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 10);
+export function generateUserId(): string {
+  return `usr_${generateUserUid()}`;
+}
+
