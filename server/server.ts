@@ -8,6 +8,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 import express, { Request, Response } from 'express';
@@ -743,6 +744,20 @@ async function killPortProcess(port: number): Promise<boolean> {
   return killed;
 }
 
+function getNetworkIp(): string | null {
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          return iface.address;
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 const server = http.createServer(app);
 
 async function startServer() {
@@ -766,9 +781,12 @@ async function startServer() {
 
     server.listen(targetPort, '0.0.0.0', () => {
       saveServerPort(targetPort);
-      console.info(`[TypeSense Backend] 服务已就绪，固定监听 3125 端口:`);
+      const netIp = getNetworkIp();
+      console.info(`[TypeSense Backend] 服务已就绪，已监听 0.0.0.0:${targetPort}:`);
       console.info(`  ➜ Local:   http://localhost:${targetPort}/`);
-      console.info(`  ➜ IPv4:    http://127.0.0.1:${targetPort}/`);
+      if (netIp) {
+        console.info(`  ➜ Network: http://${netIp}:${targetPort}/`);
+      }
       console.info(`  ➜ 端口配置已同步至 data/server-port.json`);
     });
   } catch (err) {
