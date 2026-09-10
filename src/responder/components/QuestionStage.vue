@@ -83,7 +83,6 @@ watch(
       <div class="prompt-header-line">
         <div class="seq-badge">
           <span>{{ seqNumber }}</span>
-          <span class="arrow-sym">➔</span>
         </div>
 
         <h2 class="question-title">
@@ -113,23 +112,19 @@ watch(
       </div>
     </div>
 
-    <!-- 底部确定与快捷键操作栏 -->
-    <div class="action-footer">
+    <!-- 底部确认操作栏 (单选题点击自动推进流转，不显示确认键；非单选题显示确认键) -->
+    <div v-if="question.type !== 'single_choice'" class="action-footer">
       <NButton
         type="primary"
         size="large"
         class="zen-ok-btn"
         @click="emit('next')"
       >
-        <span>确定</span>
+        <span>确认</span>
         <template #icon>
           <Check :size="17" stroke-width="2.5" />
         </template>
       </NButton>
-
-      <span class="enter-hint">
-        按 <kbd class="kbd-badge">Enter ↵</kbd>
-      </span>
     </div>
   </div>
 </template>
@@ -158,21 +153,18 @@ watch(
 .seq-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  background: #f1f5f9;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  background: #ecfdf5;
+  border: 1px solid rgba(16, 185, 129, 0.28);
   border-radius: 8px;
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-weight: 700;
-  color: #4f46e5;
+  color: #059669;
   margin-top: 3px;
   flex-shrink: 0;
-}
-
-.arrow-sym {
-  color: #94a3b8;
-  font-size: 0.8rem;
 }
 
 .question-title {
@@ -376,23 +368,6 @@ watch(
 
 :deep(.zen-ok-btn:active) {
   transform: scale(0.97);
-}
-
-.enter-hint {
-  font-size: 0.88rem;
-  color: #94a3b8;
-}
-
-.kbd-badge {
-  display: inline-block;
-  padding: 2px 7px;
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  color: #475569;
-  font-family: inherit;
-  font-weight: 600;
 }
 </style>
 

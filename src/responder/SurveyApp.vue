@@ -7,7 +7,7 @@ import {
   NSpin,
   type GlobalThemeOverrides,
 } from 'naive-ui';
-import { ChevronLeft, CornerDownLeft, History, ArrowRight, Check } from 'lucide-vue-next';
+import { ChevronLeft, ChevronRight, CornerDownLeft, History, ArrowRight, Check } from 'lucide-vue-next';
 
 import type { QuestionnaireModel, QuestionItemModel } from '../schema/questionnaire-schema-types';
 import { QuestionnaireRepositoryService } from '../services/questionnaire-repository-service';
@@ -481,7 +481,7 @@ onUnmounted(() => {
         <!-- 底部悬浮控制坞 (仅在答题态展示) -->
         <nav v-if="stage === 'question'" class="floating-dock-bar">
           <div class="dock-inner">
-            <!-- 回退按钮 -->
+            <!-- 上一题按钮 -->
             <button
               class="dock-nav-btn prev-btn"
               :disabled="historyStack.length === 0"
@@ -499,16 +499,15 @@ onUnmounted(() => {
               <span class="counter-total">{{ totalQuestions }}</span>
             </div>
 
-            <!-- 自动存盘微指示 -->
-            <div v-if="draftSavedTime" class="dock-autosave-indicator" title="已自动实时保存到本地缓存">
-              <Check class="autosave-icon" />
-              <span>已存 {{ draftSavedTime }}</span>
-            </div>
-
-            <!-- 下一步 / 提交按钮 -->
-            <button class="dock-nav-btn next-btn" :disabled="isSubmitting" @click="handleNext">
+            <!-- 下一步 / 提交按钮 (低存在感，与上一题一致) -->
+            <button
+              class="dock-nav-btn next-btn"
+              :disabled="isSubmitting"
+              :title="isLastQuestion ? '完成并提交问卷' : '进入下一题'"
+              @click="handleNext"
+            >
               <span class="dock-btn-label">{{ isLastQuestion ? '完成提交' : '下一题' }}</span>
-              <CornerDownLeft class="dock-enter-hint" />
+              <ChevronRight class="dock-icon" />
             </button>
           </div>
         </nav>
@@ -680,31 +679,25 @@ onUnmounted(() => {
 }
 
 .dock-nav-btn.next-btn {
-  background: var(--zen-primary);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.28);
+  background: transparent;
+  color: var(--zen-text-secondary);
+  box-shadow: none;
 }
 
 .dock-nav-btn.next-btn:hover:not(:disabled) {
-  background: var(--zen-primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+  background: var(--zen-surface-hover);
+  color: var(--zen-text-primary);
+  box-shadow: none;
 }
 
-.dock-nav-btn.next-btn:active:not(:disabled) {
-  transform: scale(0.97);
+.dock-nav-btn.next-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .dock-icon {
   width: 16px;
   height: 16px;
-}
-
-.dock-enter-hint {
-  width: 14px;
-  height: 14px;
-  opacity: 0.8;
-  margin-left: 2px;
 }
 
 .dock-counter {
