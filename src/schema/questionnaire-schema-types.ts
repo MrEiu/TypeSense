@@ -47,6 +47,8 @@ export interface QuestionItemModel {
   type: QuestionKind;
   title: string;
   options?: RawOption[];
+  /** 李克特量表捆绑子条目/陈述列表 */
+  statements?: (string | { id?: string; label?: string })[];
   description?: string;
   placeholder?: string;
   required?: boolean;
@@ -73,7 +75,7 @@ export interface QuestionnaireModel {
 /**
  * 答题结果映射
  */
-export type QuestionAnswerValue = number | number[] | string | null;
+export type QuestionAnswerValue = number | number[] | string | Record<string, number> | null;
 
 export interface QuestionAnswerMap {
   [questionId: string]: QuestionAnswerValue;
@@ -90,6 +92,21 @@ export function normalizeOptions(options?: RawOption[]): NormalizedOption[] {
     }
     const label = opt.label || `选项 ${index + 1}`;
     const id = opt.id ?? String(index);
+    return { id, label };
+  });
+}
+
+/**
+ * 李克特子条目标准化辅助工具
+ */
+export function normalizeStatements(statements?: (string | { id?: string; label?: string })[]): NormalizedOption[] {
+  if (!Array.isArray(statements) || statements.length === 0) return [];
+  return statements.map((item, index) => {
+    if (typeof item === 'string') {
+      return { id: String(index), label: item };
+    }
+    const label = item.label || `条目 ${index + 1}`;
+    const id = item.id ?? String(index);
     return { id, label };
   });
 }

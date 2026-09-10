@@ -120,30 +120,17 @@ function handleQuestionTypeChange(newType: string | number) {
       currentQuestion.value.placeholder = '请输入您的回答内容...';
     }
   } else if (targetType === 'likert_scale') {
-    // 智能初始化为 5 点量表
-    if (!currentQuestion.value.options || currentQuestion.value.options.length < 3) {
-      currentQuestion.value.options = ['完全不赞同', '不太赞同', '基本赞同', '非常赞同', '完全赞同'];
+    if (!currentQuestion.value.statements || currentQuestion.value.statements.length === 0) {
+      currentQuestion.value.statements = ['条目 1', '条目 2', '条目 3'];
+    }
+    if (!currentQuestion.value.options || currentQuestion.value.options.length < 2) {
+      currentQuestion.value.options = ['1', '2', '3', '4', '5'];
     }
   } else if (targetType === 'single_choice' || targetType === 'multiple_choice') {
     // 确保选择题有基础选项
     if (!currentQuestion.value.options || currentQuestion.value.options.length === 0) {
       currentQuestion.value.options = ['选项 1', '选项 2', '选项 3'];
     }
-  }
-  markDirty();
-}
-
-// 一键应用量表预设
-function applyLikertPreset(presetType: 'satisfaction' | 'agreement' | 'frequency' | 'score') {
-  if (!currentQuestion.value) return;
-  if (presetType === 'satisfaction') {
-    currentQuestion.value.options = ['非常不满意', '不太满意', '一般', '比较满意', '非常满意'];
-  } else if (presetType === 'agreement') {
-    currentQuestion.value.options = ['完全不赞同', '不太赞同', '中立', '比较赞同', '非常赞同'];
-  } else if (presetType === 'frequency') {
-    currentQuestion.value.options = ['从不', '极少', '有时', '经常', '总是'];
-  } else if (presetType === 'score') {
-    currentQuestion.value.options = ['1分', '2分', '3分', '4分', '5分'];
   }
   markDirty();
 }
@@ -186,18 +173,26 @@ function addQuestion(type: QuestionKind = 'single_choice') {
   const newId = `q${count}`;
 
   let defaultOptions: string[] | undefined = undefined;
+  let defaultStatements: string[] | undefined = undefined;
+
   if (type === 'single_choice' || type === 'multiple_choice') {
     defaultOptions = ['选项 1', '选项 2', '选项 3'];
   } else if (type === 'likert_scale') {
-    defaultOptions = ['完全不赞同', '不太赞同', '基本赞同', '非常赞同'];
+    defaultStatements = [
+      '功能操作直观，易于上手',
+      '界面排版美观，视觉舒适',
+      '整体产品体验符合我的预期',
+    ];
+    defaultOptions = ['完全不赞同', '不太赞同', '中立', '比较赞同', '非常赞同'];
   }
 
   const newQ: QuestionItemModel = {
     id: newId,
     type,
-    title: `新题目 ${count}`,
+    title: type === 'likert_scale' ? `请对以下各项维度进行评价 ${count}` : `新题目 ${count}`,
     required: true,
     options: defaultOptions,
+    statements: defaultStatements,
   };
 
   questionnaire.value.questions.push(newQ);
@@ -243,6 +238,38 @@ function moveQuestion(index: number, direction: 'up' | 'down') {
   markDirty();
 }
 
+// 评测条目 (Statements) 操作
+function addStatement() {
+  if (!currentQuestion.value) return;
+  if (!Array.isArray(currentQuestion.value.statements)) {
+    currentQuestion.value.statements = [];
+  }
+  const nextIdx = currentQuestion.value.statements.length + 1;
+  currentQuestion.value.statements.push(`评测条目 ${nextIdx}`);
+  markDirty();
+}
+
+function removeStatement(stmtIndex: number) {
+  if (!currentQuestion.value || !Array.isArray(currentQuestion.value.statements)) return;
+  if (currentQuestion.value.statements.length <= 1) {
+    alert('量表题至少需保留一个评测条目');
+    return;
+  }
+  currentQuestion.value.statements.splice(stmtIndex, 1);
+  markDirty();
+}
+
+function updateStatementText(stmtIndex: number, text: string) {
+  if (!currentQuestion.value || !Array.isArray(currentQuestion.value.statements)) return;
+  const target = currentQuestion.value.statements[stmtIndex];
+  if (typeof target === 'object' && target !== null) {
+    target.label = text;
+  } else {
+    currentQuestion.value.statements[stmtIndex] = text;
+  }
+  markDirty();
+}
+
 // 选项操作
 function addOption() {
   if (!currentQuestion.value) return;
@@ -250,14 +277,16 @@ function addOption() {
     currentQuestion.value.options = [];
   }
   const nextIdx = currentQuestion.value.options.length + 1;
-  currentQuestion.value.options.push(`选项 ${nextIdx}`);
+  currentQuestion.value.options.push(
+    currentQuestion.value.type === 'likert_scale' ? `第 ${nextIdx} 级` : `选项 ${nextIdx}`
+  );
   markDirty();
 }
 
 function removeOption(optIndex: number) {
   if (!currentQuestion.value || !Array.isArray(currentQuestion.value.options)) return;
   if (currentQuestion.value.options.length <= 1) {
-    alert('选择题至少需保留一个选项');
+    alert('至少需保留一个选项或刻度');
     return;
   }
   currentQuestion.value.options.splice(optIndex, 1);
@@ -692,7 +721,52 @@ onMounted(async () => {
               </div>
             </TsCard>
 
-            <!-- 选项列表 (单选/多选/量表) -->
+            <!-- 李克特量表专属：评测条目设置 (Statements) -->
+            <TsCard
+              v-if="currentQuestion.type === 'likert_scale'"
+              padding="md"
+              class="config-block"
+            >
+              <div class="section-title-row">
+                <div class="options-title-group">
+                  <span class="section-title">评测条目设置 (Statements)</span>
+                  <TsBadge variant="success" size="sm">
+                    共 {{ (currentQuestion.statements || []).length }} 项
+                  </TsBadge>
+                </div>
+                <TsButton variant="secondary" size="xs" @click="addStatement">
+                  <Plus style="width: 12px; height: 12px;" />
+                  <span>增加条目</span>
+                </TsButton>
+              </div>
+
+              <div class="options-container">
+                <div
+                  v-for="(stmt, sIdx) in currentQuestion.statements || []"
+                  :key="sIdx"
+                  class="option-item"
+                >
+                  <span class="stmt-num-badge">{{ sIdx + 1 }}</span>
+                  <TsInput
+                    :model-value="typeof stmt === 'string' ? stmt : stmt.label"
+                    size="sm"
+                    placeholder="输入评价条目陈述内容..."
+                    @update:model-value="(val) => updateStatementText(sIdx, val)"
+                  />
+                  <TsButton
+                    variant="ghost"
+                    size="xs"
+                    class="btn-danger"
+                    title="删除此条目"
+                    @click="removeStatement(sIdx)"
+                  >
+                    <Trash2 style="width: 13px; height: 13px;" />
+                  </TsButton>
+                </div>
+              </div>
+            </TsCard>
+
+            <!-- 选项 / 刻度列表 (单选/多选/量表) -->
             <TsCard
               v-if="currentQuestion.type !== 'text_input'"
               padding="md"
@@ -700,7 +774,9 @@ onMounted(async () => {
             >
               <div class="section-title-row">
                 <div class="options-title-group">
-                  <span class="section-title">选项设置</span>
+                  <span class="section-title">
+                    {{ currentQuestion.type === 'likert_scale' ? '量表评分标尺 (Scale Levels)' : '选项设置' }}
+                  </span>
                   <TsBadge
                     v-if="currentQuestion.type === 'multiple_choice'"
                     variant="info"
@@ -713,32 +789,13 @@ onMounted(async () => {
                     variant="success"
                     size="sm"
                   >
-                    量表评分模式
+                    {{ (currentQuestion.options || []).length }} 阶刻度
                   </TsBadge>
                 </div>
                 <TsButton variant="secondary" size="xs" @click="addOption">
                   <Plus style="width: 12px; height: 12px;" />
-                  <span>增加选项</span>
+                  <span>{{ currentQuestion.type === 'likert_scale' ? '增加刻度' : '增加选项' }}</span>
                 </TsButton>
-              </div>
-
-              <!-- 量表题专属快捷预设 -->
-              <div v-if="currentQuestion.type === 'likert_scale'" class="likert-preset-bar">
-                <span class="preset-label">快捷量表模板：</span>
-                <div class="preset-buttons">
-                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('satisfaction')">
-                    5点满意度
-                  </TsButton>
-                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('agreement')">
-                    5点认同度
-                  </TsButton>
-                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('frequency')">
-                    5点频次
-                  </TsButton>
-                  <TsButton variant="secondary" size="xs" @click="applyLikertPreset('score')">
-                    5分制
-                  </TsButton>
-                </div>
               </div>
 
               <div class="options-container">
@@ -747,18 +804,20 @@ onMounted(async () => {
                   :key="oIdx"
                   class="option-item"
                 >
-                  <span class="opt-alpha">{{ String.fromCharCode(65 + oIdx) }}</span>
+                  <span class="opt-alpha">
+                    {{ currentQuestion.type === 'likert_scale' ? oIdx + 1 : String.fromCharCode(65 + oIdx) }}
+                  </span>
                   <TsInput
                     :model-value="typeof opt === 'string' ? opt : opt.label"
                     size="sm"
-                    placeholder="输入选项内容..."
+                    placeholder="输入刻度/选项文案..."
                     @update:model-value="(val) => updateOptionText(oIdx, val)"
                   />
                   <TsButton
                     variant="ghost"
                     size="xs"
                     class="btn-danger"
-                    title="删除此选项"
+                    title="删除此项"
                     @click="removeOption(oIdx)"
                   >
                     <Trash2 style="width: 13px; height: 13px;" />
@@ -1178,31 +1237,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.likert-preset-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: #f8fafc;
-  border-radius: 8px;
-  border: 1px dashed rgba(15, 23, 42, 0.12);
-  margin-bottom: 6px;
-}
-
-.preset-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #64748b;
-  flex-shrink: 0;
-}
-
-.preset-buttons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
 .options-container {
   display: flex;
   flex-direction: column;
@@ -1222,6 +1256,20 @@ onMounted(async () => {
   color: #64748b;
   width: 18px;
   text-align: center;
+}
+
+.stmt-num-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: #ecfdf5;
+  color: #059669;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .jump-heading {

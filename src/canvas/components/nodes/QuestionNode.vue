@@ -47,15 +47,33 @@ function getTypeLabel(type: string): string {
 
     <div class="node-title">{{ q.title }}</div>
 
-    <!-- 选项预览列表 -->
-    <div v-if="q.options && q.options.length > 0" class="options-preview">
+    <!-- 李克特矩阵量表预览 -->
+    <div v-if="q.type === 'likert_scale' && q.statements && q.statements.length > 0" class="options-preview">
+      <div class="matrix-summary-pill">
+        📋 {{ q.statements.length }} 个评测条目 · {{ (q.options || []).length }} 阶刻度
+      </div>
+      <div
+        v-for="(stmt, idx) in q.statements.slice(0, 3)"
+        :key="idx"
+        class="opt-item"
+      >
+        <span class="opt-bullet">◈</span>
+        <span class="opt-text">{{ typeof stmt === 'string' ? stmt : stmt.label }}</span>
+      </div>
+      <div v-if="q.statements.length > 3" class="opt-more">
+        + 其余 {{ q.statements.length - 3 }} 个条目...
+      </div>
+    </div>
+
+    <!-- 选项预览列表 (选择题 / 单行打分) -->
+    <div v-else-if="q.options && q.options.length > 0" class="options-preview">
       <div
         v-for="(opt, idx) in q.options.slice(0, 3)"
         :key="idx"
         class="opt-item"
       >
         <span class="opt-bullet">○</span>
-        <span class="opt-text">{{ opt }}</span>
+        <span class="opt-text">{{ typeof opt === 'string' ? opt : opt.label }}</span>
       </div>
       <div v-if="q.options.length > 3" class="opt-more">
         + 其余 {{ q.options.length - 3 }} 项...
@@ -154,6 +172,17 @@ function getTypeLabel(type: string): string {
   flex-direction: column;
   gap: 5px;
   margin-bottom: 8px;
+}
+
+.matrix-summary-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  padding: 3px 8px;
+  border-radius: 6px;
+  margin-bottom: 4px;
 }
 
 .opt-item {
