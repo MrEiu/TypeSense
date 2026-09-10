@@ -43,7 +43,7 @@ process.on('exit', () => {
 
 
 // 1. 启动后端
-const backendCmd = isWindows ? 'npx.cmd tsx --no-warnings watch server/server.ts' : 'npx tsx --no-warnings watch server/server.ts';
+const backendCmd = isWindows ? 'npx.cmd tsx watch server/server.ts' : 'npx tsx watch server/server.ts';
 const backend = spawn(backendCmd, {
   stdio: 'inherit',
   shell: true,

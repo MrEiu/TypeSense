@@ -101,46 +101,79 @@ export class AiGeneratorService {
     const prompt = (options.prompt || '').trim();
     const enableJump = options.enableJumpLogic !== false;
 
-    const jumpConstraint = enableJump
-      ? `4. jump（按需配置）：跳转目标为题号 "qK"、"end"（正常完成）或 "exit"（提前甄别终止）。普通无跳转的题目必须完全省略 jump。`
-      : `4. 严禁生成任何 jump 或 set 字段。`;
+    const systemPrompt = `你是一位调研设计专家。请根据用户需求生成结构化问卷 JSON。
+必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
 
-    const systemPrompt = `你是一位资深调研设计专家。请根据用户的调研诉求生成一份高质量的问卷。
-必须直接输出纯 JSON，严禁输出任何 Markdown 标记、代码块或多余解释，结构严格如下：
-
-{
-  "title": "问卷标题",
-  "description": "问卷说明与背景",
-  "questions": [
-    {
-      "id": "q1",
-      "type": "single_choice",
-      "title": "题目题干",
-      "options": ["选项0", "选项1"],
-      "required": true,
-      "jump": [
-        { "when": { "q1": 0 }, "to": "exit" }
-      ]
-    }
-  ]
+数据契约定义：
+interface QuestionnaireOutput {
+  title: string;
+  description: string;
+  questions: QuestionItem[];
 }
 
-契约规范：
-1. id 严格为 q1, q2, q3... 顺序递增。
-2. type 仅限：single_choice（单选题）、multiple_choice（多选题）、likert_scale（量表题）、text_input（填空题）。
-3. 除 text_input 外必须提供 options 字符串数组；text_input 必须省略 options 并可提供 placeholder。
-${jumpConstraint}
-5. 变量与流转机制：每道题目的答题结果自动作为变量（以题号如 q1, q2 直接命名与引用），无需额外注册变量。跳转条件可直接根据前序题号判断（如 { "q1": 0 } 或 { "q2": { ">=": 3 } }）。除非确实需要复合数学计算，否则无需生成 set 字段；未被使用的变量注册将在生成后自动清除。
-6. 自由度：根据实际调研场景与目标领域，完全自主决定题型组合、题干用词与题目流向。`;
+type QuestionItem =
+  | SingleChoiceQuestion
+  | MultipleChoiceQuestion
+  | LikertScaleQuestion
+  | TextInputQuestion;
+
+// 单选题
+interface SingleChoiceQuestion {
+  id: string;          // 题号 "q1", "q2"...
+  type: "single_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 多选题
+interface MultipleChoiceQuestion {
+  id: string;
+  type: "multiple_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 量表题（矩阵评分）
+interface LikertScaleQuestion {
+  id: string;
+  type: "likert_scale";
+  title: string;
+  options: string[];   // 评分刻度（列）
+  statements: string[];// 评价条目（行）
+  jump?: JumpRule[];
+}
+
+// 填空题
+interface TextInputQuestion {
+  id: string;
+  type: "text_input";
+  title: string;
+  placeholder?: string;
+}
+
+// 跳转规则（仅在关键节点使用）
+interface JumpRule {
+  when?: Record<string, number | { has: number } | { "<=": number } | { ">=": number }>;
+  else?: boolean;
+  to: string;          // 目标题号 "qK"、正常完成 "end" 或淘汰退出 "exit"
+}
+
+逻辑模板与拓扑规则：
+- 拓扑骨架：模板定义关键节点的跳转分支与流转规则（如前置筛选、深度追问等）。
+- 语义填充：遵循模板的流转网络，结合用户的具体调研需求生成对应的题干、选项及评价维度。
+- 缺省行为：未选用模板时，默认采用线性自然推进，仅在有明确分流需要时自主配置关键节点（跳转必须单向向前）。`;
 
     const templateContext = TemplateService.formatTemplatesForPrompt(options.templateIds);
 
     const userPrompt = [
       `调研需求：${prompt || '用户综合体验与满意度调研'}`,
-      `目标题目数量：${targetCount} 题左右`,
-      templateContext ? `参考逻辑模板与跳转范式：\n${templateContext}\n（请吸收参考上述模板中的跳转拓扑结构构建题目流向）` : '',
-      docText ? `参考资料：\n${docText}` : '参考资料：无',
-    ].filter(Boolean).join('\n');
+      `目标题量：约 ${targetCount} 题`,
+      docText ? `参考资料：\n${docText}` : '',
+      templateContext ? `参考逻辑模板：\n${templateContext}` : '',
+      '请直接输出符合契约的纯 JSON 问卷数据：',
+    ].filter(Boolean).join('\n\n');
 
     try {
       const response = await LlmLogger.callAndLog(
@@ -430,12 +463,16 @@ ${jumpConstraint}
       .join('; ');
 
     const jumpInstruction = params.enableJumpLogic !== false
-      ? `跳转规则（按需生成）：
-- 若题目需要逻辑跳转，在题目中配置 "jump": [ { "when": { "q${startIndex}": 0 }, "to": "exit" } ]
-- when 条件的键为题目 id，值为选项索引（0-based 数字）
-- to 目标可为具体题号（如 "q${startIndex + 2}"）、"end"（正常完成）或 "exit"（提前退出）
-- 普通自然顺次推进的题目完全省略 jump。`
-      : `严禁生成任何 jump 或 set 字段。`;
+      ? `流转规则：
+- 默认自然顺延，常规题目无需声明 jump。
+- 仅在关键分流/甄别节点声明 jump：
+  - 单选匹配：{ "when": { "q${startIndex}": 0 }, "to": "q${startIndex + 2}" }
+  - 多选包含：{ "when": { "q${startIndex}": { "has": 1 } }, "to": "q${startIndex + 2}" }
+  - 评分比较：{ "when": { "q${startIndex}": { "<=": 1 } }, "to": "q${startIndex + 2}" }
+  - 淘汰退出："to": "exit"
+  - 提前完成："to": "end"
+  - 仅允许单向向前跳转（目标题号必须更大）。`
+      : `流转规则：严禁生成任何 jump 字段。`;
 
     const userPromptContent = [
       `问卷标题: ${params.blueprint.title}`,
@@ -443,7 +480,7 @@ ${jumpConstraint}
       `当前出题组块: 【${params.block.name}】（${params.block.description}）`,
       `必须生成题目数量: ${count} 题（题号必须从 q${startIndex} 到 q${targetEndIndex}）`,
       previousSummary ? `前序已生成题目: ${previousSummary}` : '',
-      templateContext ? `参考逻辑模板与跳转范式:\n${templateContext}` : '',
+      templateContext ? `参考逻辑模板:\n${templateContext}` : '',
       params.refinePrompt ? `用户补充要求: ${params.refinePrompt}` : '',
     ].filter(Boolean).join('\n');
 
@@ -457,26 +494,65 @@ ${jumpConstraint}
           messages: [
             {
               role: 'system',
-              content: `你是一位专业问卷设计师。请根据指定调研组块的要求生成题目列表。
-必须直接输出纯 JSON，格式如下：
+              content: `你是一位调研设计专家。请根据指定调研组块的要求生成题目列表。
+必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
+
+契约定义：
 {
-  "questions": [
-    {
-      "id": "q${startIndex}",
-      "type": "single_choice" | "multiple_choice" | "likert_scale" | "text_input",
-      "title": "题目题干",
-      "options": ["选项0", "选项1"],
-      "required": true,
-      "jump": [ { "when": { "q${startIndex}": 0 }, "to": "exit" } ]
-    }
-  ]
+  questions: QuestionItem[];
+}
+
+type QuestionItem =
+  | SingleChoiceQuestion
+  | MultipleChoiceQuestion
+  | LikertScaleQuestion
+  | TextInputQuestion;
+
+// 单选题
+interface SingleChoiceQuestion {
+  id: string;          // 题号从 q${startIndex} 到 q${targetEndIndex}
+  type: "single_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 多选题
+interface MultipleChoiceQuestion {
+  id: string;
+  type: "multiple_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 量表题（矩阵评分）
+interface LikertScaleQuestion {
+  id: string;
+  type: "likert_scale";
+  title: string;
+  options: string[];   // 评分刻度（列）
+  statements: string[];// 评价条目（行）
+  jump?: JumpRule[];
+}
+
+// 填空题
+interface TextInputQuestion {
+  id: string;
+  type: "text_input";
+  title: string;
+  placeholder?: string;
+}
+
+// 跳转规则（仅在关键节点使用）
+interface JumpRule {
+  when?: Record<string, number | { has: number } | { "<=": number } | { ">=": number }>;
+  else?: boolean;
+  to: string;          // 目标题号 "qK"、正常完成 "end" 或淘汰退出 "exit"
 }
 
 规范：
-1. id 严格为 q${startIndex} 至 q${targetEndIndex} 顺序递增。
-2. type 仅限：single_choice（单选题）、multiple_choice（多选题）、likert_scale（量表题）、text_input（文本填空题）。
-3. 除 text_input 外必须提供 options 字符串数组；text_input 必须省略 options 并提供 placeholder。
-4. 变量与流转机制：每道题目的答题结果自动作为变量（以题号如 q1, q2 直接指代），无需额外注册变量。跳转条件可直接根据题号进行判断（如 { "q${startIndex}": 0 } 或 { "q1": { ">=": 3 } }）。无需生成冗余 set 变量注册。
+- 题号必须严格从 q${startIndex} 到 q${targetEndIndex} 顺序递增。
 ${jumpInstruction}`,
             },
             {
