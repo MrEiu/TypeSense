@@ -164,7 +164,7 @@ export function useSurveyFlow() {
     engine = new QuestionnaireFlowEngine({
       questions: survey.value.questions,
       initialCursor: draft.cursor,
-      initialAnswers: draft.answers,
+      initialAnswers: draft.answers as any,
       initialHistory: draft.history,
     });
 
