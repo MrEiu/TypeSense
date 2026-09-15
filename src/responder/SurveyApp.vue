@@ -56,6 +56,10 @@ const responseId = ref<string>('');
 const disqualifiedReason = ref<string>('');
 const questionStageRef = ref<{ triggerShake: () => void } | null>(null);
 
+// AI speed-fill recorded question ID set
+const aiRecordedQuestionIds = ref<Set<string>>(new Set());
+let pendingAction: 'start' | 'aiFill' | null = null;
+
 // 草稿暂存状态
 const existingDraft = ref<SurveyDraftData | null>(null);
 const draftSavedTime = ref<string>('');
@@ -71,6 +75,16 @@ const currentQuestion = computed<QuestionItemModel | undefined>(() => {
 // 题目总数与当前序号
 const totalQuestions = computed(() => {
   return survey.value?.questions?.length || 1;
+});
+
+// Total answered questions count
+const answeredCount = computed(() => {
+  return Object.keys(answersMap.value).filter((k) => {
+    const v = answersMap.value[k];
+    if (v === undefined || v === null || v === '') return false;
+    if (Array.isArray(v) && v.length === 0) return false;
+    return true;
+  }).length;
 });
 
 const currentSeqNumber = computed(() => {
@@ -203,6 +217,7 @@ function handleUpdateAnswer(val: unknown) {
 // 开始答题（严格校验已登录状态）
 function handleStart() {
   if (!AuthClientService.isLoggedIn()) {
+    pendingAction = 'start';
     showAuthModal.value = true;
     return;
   }
@@ -215,12 +230,25 @@ function handleStart() {
   stage.value = 'question';
 }
 
+// One-click AI quick-fill entry from welcome card
+function handleOpenAiFill() {
+  if (!AuthClientService.isLoggedIn()) {
+    pendingAction = 'aiFill';
+    showAuthModal.value = true;
+    return;
+  }
+  showAiChatFiller.value = true;
+}
+
 // 鉴权登录成功回调
 function onAuthSuccess(user: UserProfile) {
   currentUser.value = user;
   showAuthModal.value = false;
-  // 若仍停留在欢迎界面，登录完成后顺畅自动开启答卷
-  if (stage.value === 'welcome') {
+  if (pendingAction === 'aiFill') {
+    pendingAction = null;
+    showAiChatFiller.value = true;
+  } else if (stage.value === 'welcome') {
+    pendingAction = null;
     handleStart();
   }
 }
@@ -234,11 +262,35 @@ function handleUserLogout() {
 // 接收并合并 AI 对话填写的答案
 function handleSyncAiAnswers(updatedAnswers: QuestionAnswerMap, newCount: number) {
   answersMap.value = { ...answersMap.value, ...updatedAnswers };
+  if (engine) {
+    engine.setAnswers(updatedAnswers as any);
+  }
+  for (const qId of Object.keys(updatedAnswers)) {
+    aiRecordedQuestionIds.value.add(qId);
+  }
   saveCurrentDraft();
 
   // 若当前停留的题目已有新提取的答案，实时联动更新当前答案
   if (currentQuestion.value && answersMap.value[currentQuestion.value.id] !== undefined) {
     currentAnswer.value = answersMap.value[currentQuestion.value.id];
+  }
+}
+
+// Auto transition into questionnaire stage after AI finish
+function handleAiFinish(newCount: number) {
+  if (stage.value === 'welcome') {
+    if (!AuthClientService.isLoggedIn()) {
+      pendingAction = 'start';
+      showAuthModal.value = true;
+      return;
+    }
+    if (!engine) return;
+    const step = engine.getCurrentStep();
+    currentStep.value = step;
+    if (step.currentQuestion) {
+      currentAnswer.value = answersMap.value[step.currentQuestion.id];
+    }
+    stage.value = 'question';
   }
 }
 
@@ -533,6 +585,7 @@ onUnmounted(() => {
               :estimated-minutes="Math.max(2, Math.ceil(totalQuestions / 2))"
               :total-questions="totalQuestions"
               @start="handleStart"
+              @ai-fill="handleOpenAiFill"
             />
           </div>
 
@@ -544,6 +597,7 @@ onUnmounted(() => {
               :seq-number="currentSeqNumber"
               :total-questions="totalQuestions"
               :current-answer="currentAnswer"
+              :is-ai-prefilled="currentQuestion ? aiRecordedQuestionIds.has(currentQuestion.id) : false"
               @update:answer="handleUpdateAnswer"
               @next="handleNext"
             />
@@ -584,6 +638,7 @@ onUnmounted(() => {
               <span class="counter-curr">{{ currentSeqNumber }}</span>
               <span class="counter-divider">/</span>
               <span class="counter-total">{{ totalQuestions }}</span>
+              <span v-if="answeredCount > 0" class="counter-answered">· 已作答 {{ answeredCount }} 题</span>
             </div>
 
             <!-- 下一步 / 提交按钮 (低存在感，与上一题一致) -->
@@ -614,6 +669,7 @@ onUnmounted(() => {
           :survey="survey"
           :initial-answers="(answersMap as QuestionAnswerMap)"
           @sync-answers="handleSyncAiAnswers"
+          @finish="handleAiFinish"
         />
       </div>
     </NMessageProvider>
@@ -946,6 +1002,13 @@ onUnmounted(() => {
   font-weight: 600;
   color: var(--zen-text-muted);
   user-select: none;
+}
+
+.counter-answered {
+  margin-left: 6px;
+  color: #4f46e5;
+  font-weight: 600;
+  font-size: 0.8rem;
 }
 
 .counter-curr {

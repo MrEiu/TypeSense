@@ -3,10 +3,12 @@ import fs from 'fs';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 
-// 动态读取后端服务实际启动的端口（实现后端自动更换端口时无缝转发，彻底解决端口冲突）
+// Dynamically read backend port with runtime directory support
 function getBackendTarget(): string {
   try {
-    const portFilePath = resolve(__dirname, 'data/server-port.json');
+    const runtimePortFile = resolve(__dirname, 'data/runtime/server-port.json');
+    const legacyPortFile = resolve(__dirname, 'data/server-port.json');
+    const portFilePath = fs.existsSync(runtimePortFile) ? runtimePortFile : legacyPortFile;
     if (fs.existsSync(portFilePath)) {
       const raw = fs.readFileSync(portFilePath, 'utf-8');
       const data = JSON.parse(raw);
@@ -15,7 +17,7 @@ function getBackendTarget(): string {
       }
     }
   } catch {
-    // 容错读取
+    // Graceful fallback
   }
   const defaultPort = Number(process.env.PORT) || 3125;
   return `http://127.0.0.1:${defaultPort}`;

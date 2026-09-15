@@ -13,7 +13,9 @@ import OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CONFIG_PATH = path.resolve(__dirname, '../data/config.json');
+const RUNTIME_CONFIG_PATH = path.resolve(__dirname, '../data/runtime/config.json');
+const LEGACY_CONFIG_PATH = path.resolve(__dirname, '../data/config.json');
+const CONFIG_PATH = RUNTIME_CONFIG_PATH;
 
 interface ModelConfig {
   baseURL: string;
@@ -22,9 +24,15 @@ interface ModelConfig {
 }
 
 function loadConfig(): ModelConfig {
-  if (fs.existsSync(CONFIG_PATH)) {
+  const targetPath = fs.existsSync(RUNTIME_CONFIG_PATH)
+    ? RUNTIME_CONFIG_PATH
+    : fs.existsSync(LEGACY_CONFIG_PATH)
+    ? LEGACY_CONFIG_PATH
+    : null;
+
+  if (targetPath) {
     try {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      return JSON.parse(fs.readFileSync(targetPath, 'utf-8'));
     } catch {}
   }
   return { baseURL: '', apiKey: '', model: '' };

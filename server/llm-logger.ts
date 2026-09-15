@@ -16,9 +16,8 @@ import { fileURLToPath } from 'node:url';
 import type OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-export const LOGS_FILE_PATH = path.resolve(__dirname, '../data/llm-logs.md');
+export const LOGS_DIR = path.resolve(__dirname, '../logs/llm');
+export const LOGS_FILE_PATH = path.join(LOGS_DIR, 'llm-logs.md');
 
 export interface LlmLogEntry {
   action: string;
@@ -53,10 +52,14 @@ export class LlmLogger {
     try {
       let rawOutput = '';
       let inThinkTag = false;
+      const aggregatedToolCalls: Record<
+        number,
+        { id: string; type: 'function'; function: { name: string; arguments: string } }
+      > = {};
 
       try {
         // 优先采用底层流式接收 (stream: true) 并实时收集 Token 分块，
-        // 彻底解决大问卷推理长耗时 (>60s) 时 Node.js undici / 网络代理 60 秒空闲超时终止 (TypeError: terminated / SocketError: other side closed)
+        // 彻底解决大问卷推理长耗时 (>60s) 时 Node.js undici / 网络代理 60 秒空闲超时终止
         const stream = await ai.client.chat.completions.create({
           ...createParams,
           stream: true,
@@ -72,7 +75,28 @@ export class LlmLogger {
             streamCallbacks?.onThought?.(reasoningDelta);
           }
 
-          // 2. 内联 <think>...</think> 标签解析支持 (Ollama / 开源权重格式)
+          // 2. 工具调用分块聚合 (Tool Calling stream chunks)
+          if (Array.isArray(deltaObj.tool_calls)) {
+            for (const tc of deltaObj.tool_calls) {
+              const idx = tc.index ?? 0;
+              if (!aggregatedToolCalls[idx]) {
+                aggregatedToolCalls[idx] = {
+                  id: tc.id || `call_${Date.now()}_${idx}`,
+                  type: 'function',
+                  function: {
+                    name: tc.function?.name || '',
+                    arguments: tc.function?.arguments || '',
+                  },
+                };
+              } else {
+                if (tc.id) aggregatedToolCalls[idx].id = tc.id;
+                if (tc.function?.name) aggregatedToolCalls[idx].function.name += tc.function.name;
+                if (tc.function?.arguments) aggregatedToolCalls[idx].function.arguments += tc.function.arguments;
+              }
+            }
+          }
+
+          // 3. 内联 <think>...</think> 标签解析支持 (Ollama / 开源权重格式)
           if (contentDelta) {
             let remaining = contentDelta;
 
@@ -109,27 +133,56 @@ export class LlmLogger {
         }
       } catch (streamErr: any) {
         // 若目标第三方接口不兼容 stream: true，则自动降级回退至常规请求
-        if (rawOutput.length === 0) {
+        if (rawOutput.length === 0 && Object.keys(aggregatedToolCalls).length === 0) {
           console.warn(`[LlmLogger] 流式模式失败，正在降级尝试非流式请求:`, streamErr.message);
           const fallbackRes = await ai.client.chat.completions.create(createParams);
           rawOutput = fallbackRes.choices[0]?.message?.content || '';
+          if (Array.isArray(fallbackRes.choices[0]?.message?.tool_calls)) {
+            for (let i = 0; i < fallbackRes.choices[0].message.tool_calls.length; i++) {
+              const tc = fallbackRes.choices[0].message.tool_calls[i] as any;
+              aggregatedToolCalls[i] = {
+                id: tc.id || `call_${Date.now()}_${i}`,
+                type: 'function',
+                function: {
+                  name: tc.function?.name || '',
+                  arguments: tc.function?.arguments || '',
+                },
+              };
+            }
+          }
         } else {
           throw streamErr;
         }
       }
 
       const durationMs = Date.now() - startTime;
+      const finalToolCalls = Object.values(aggregatedToolCalls);
+
+      let logResponse = rawOutput;
+      if (finalToolCalls.length > 0) {
+        const toolJson = JSON.stringify(finalToolCalls, null, 2);
+        logResponse = rawOutput ? `${rawOutput}\n\n[Tool Calls]:\n${toolJson}` : `[Tool Calls]:\n${toolJson}`;
+      }
 
       this.appendLog({
         action,
         model: createParams.model || ai.model,
         messages,
-        responseRaw: rawOutput,
+        responseRaw: logResponse,
         durationMs,
         metadata,
       });
 
       // 构造标准 ChatCompletion 结果返回给上层业务，零侵入无缝兼容
+      const assistantMessage: any = {
+        role: 'assistant',
+        content: rawOutput || null,
+        refusal: null,
+      };
+      if (finalToolCalls.length > 0) {
+        assistantMessage.tool_calls = finalToolCalls;
+      }
+
       const syntheticResponse: OpenAI.Chat.Completions.ChatCompletion = {
         id: `chatcmpl_stream_${Date.now()}`,
         created: Math.floor(Date.now() / 1000),
@@ -138,12 +191,8 @@ export class LlmLogger {
         choices: [
           {
             index: 0,
-            message: {
-              role: 'assistant',
-              content: rawOutput,
-              refusal: null,
-            },
-            finish_reason: 'stop',
+            message: assistantMessage,
+            finish_reason: finalToolCalls.length > 0 ? 'tool_calls' : 'stop',
             logprobs: null,
           },
         ],
@@ -207,7 +256,12 @@ ${responseBlock}
 ---
 `;
 
-      // 若文件不存在，写入文件头
+      // Ensure log directory exists
+      if (!fs.existsSync(LOGS_DIR)) {
+        fs.mkdirSync(LOGS_DIR, { recursive: true });
+      }
+
+      // If log file does not exist, initialize with header
       if (!fs.existsSync(LOGS_FILE_PATH)) {
         const header = `# TypeSense LLM 交互链路审计日志\n> 自动记录系统所有发送给大模型的 Prompt 内容与大模型的完整原始响应。\n\n---\n`;
         fs.writeFileSync(LOGS_FILE_PATH, header + logBlock, 'utf-8');

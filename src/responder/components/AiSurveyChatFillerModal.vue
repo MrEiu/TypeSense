@@ -32,6 +32,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:show', val: boolean): void;
   (e: 'syncAnswers', answers: QuestionAnswerMap, newCount: number): void;
+  (e: 'finish', count: number): void;
 }>();
 
 const messages = ref<ChatMessage[]>([]);
@@ -162,6 +163,11 @@ async function handleSend() {
       newlyRecordedMap.value[u.question_id] = u;
     }
 
+    // Real-time synchronization to host survey
+    if (updates.length > 0) {
+      emit('syncAnswers', { ...sessionAnswers.value }, newlyExtractedCount.value);
+    }
+
     messages.value.push({
       id: `msg-a-${Date.now()}`,
       role: 'assistant',
@@ -179,16 +185,28 @@ async function handleSend() {
 // Complete conversation and sync answers back to survey
 function handleFinishAndSync() {
   emit('syncAnswers', { ...sessionAnswers.value }, newlyExtractedCount.value);
+  emit('finish', newlyExtractedCount.value);
   emit('update:show', false);
 }
 
 // Cancel / close
 function handleClose() {
   if (newlyExtractedCount.value > 0) {
-    // If items were recorded, automatically sync them on exit
     handleFinishAndSync();
   } else {
     emit('update:show', false);
+  }
+}
+
+function handleModalVisibilityChange(val: boolean) {
+  if (!val) {
+    if (newlyExtractedCount.value > 0) {
+      emit('syncAnswers', { ...sessionAnswers.value }, newlyExtractedCount.value);
+      emit('finish', newlyExtractedCount.value);
+    }
+    emit('update:show', false);
+  } else {
+    emit('update:show', true);
   }
 }
 </script>
@@ -201,7 +219,7 @@ function handleClose() {
     class="ai-chat-filler-modal"
     style="width: 94vw; max-width: 680px; height: 85vh; max-height: 820px; border-radius: 20px; display: flex; flex-direction: column; overflow: hidden;"
     content-style="display: flex; flex-direction: column; height: 100%; padding: 0; overflow: hidden;"
-    @update:show="emit('update:show', $event)"
+    @update:show="handleModalVisibilityChange"
   >
     <!-- Modal Custom Header -->
     <template #header>

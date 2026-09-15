@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton } from 'naive-ui';
-import { ArrowRight, FileText, CheckCircle2 } from 'lucide-vue-next';
+import { ArrowRight, FileText, Sparkles } from 'lucide-vue-next';
 
 defineProps<{
   title: string;
@@ -10,6 +10,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'start'): void;
+  (e: 'aiFill'): void;
 }>();
 </script>
 
@@ -39,6 +40,19 @@ const emit = defineEmits<{
         <template #icon>
           <ArrowRight :size="18" />
         </template>
+      </NButton>
+
+      <NButton
+        secondary
+        type="primary"
+        size="large"
+        class="zen-ai-btn"
+        @click="emit('aiFill')"
+      >
+        <template #icon>
+          <Sparkles :size="18" class="text-indigo-600" />
+        </template>
+        <span class="btn-text">AI 速填</span>
       </NButton>
     </div>
   </div>
@@ -131,6 +145,28 @@ const emit = defineEmits<{
 }
 
 :deep(.zen-primary-btn:active) {
+  transform: scale(0.97);
+}
+
+:deep(.zen-ai-btn) {
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 12px;
+  font-size: 1.02rem;
+  font-weight: 600;
+  border: 1px solid rgba(79, 70, 229, 0.25) !important;
+  background: rgba(79, 70, 229, 0.05) !important;
+  color: #4f46e5 !important;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), background 0.16s ease;
+}
+
+:deep(.zen-ai-btn:hover) {
+  background: rgba(79, 70, 229, 0.12) !important;
+  border-color: rgba(79, 70, 229, 0.45) !important;
+  transform: translateY(-2px);
+}
+
+:deep(.zen-ai-btn:active) {
   transform: scale(0.97);
 }
 

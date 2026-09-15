@@ -17,10 +17,11 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 保证 data, uploads 与 surveys 目录存在
+// Ensure data, uploads, surveys, and runtime directories exist
 export const DATA_DIR = path.resolve(__dirname, '../data');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const SURVEYS_DIR = path.join(DATA_DIR, 'surveys');
+export const RUNTIME_DIR = path.join(DATA_DIR, 'runtime');
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -31,8 +32,26 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 if (!fs.existsSync(SURVEYS_DIR)) {
   fs.mkdirSync(SURVEYS_DIR, { recursive: true });
 }
+if (!fs.existsSync(RUNTIME_DIR)) {
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+}
 
-const DB_PATH = path.join(DATA_DIR, 'typesense.db');
+// Fallback migration: if legacy typesense.db exists in data/ and not in runtime/, migrate it
+const legacyDbPath = path.join(DATA_DIR, 'typesense.db');
+const runtimeDbPath = path.join(RUNTIME_DIR, 'typesense.db');
+if (fs.existsSync(legacyDbPath) && !fs.existsSync(runtimeDbPath)) {
+  try {
+    fs.renameSync(legacyDbPath, runtimeDbPath);
+    const legacyShm = path.join(DATA_DIR, 'typesense.db-shm');
+    const legacyWal = path.join(DATA_DIR, 'typesense.db-wal');
+    if (fs.existsSync(legacyShm)) fs.renameSync(legacyShm, path.join(RUNTIME_DIR, 'typesense.db-shm'));
+    if (fs.existsSync(legacyWal)) fs.renameSync(legacyWal, path.join(RUNTIME_DIR, 'typesense.db-wal'));
+  } catch {
+    // Continue with available path
+  }
+}
+
+const DB_PATH = fs.existsSync(runtimeDbPath) ? runtimeDbPath : legacyDbPath;
 
 export const db = new DatabaseSync(DB_PATH);
 

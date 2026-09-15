@@ -69,6 +69,13 @@ export class QuestionnaireFlowEngine {
   }
 
   /**
+   * Synchronize or merge batch answers into the flow engine context
+   */
+  public setAnswers(answers: Record<string, QuestionAnswerValue>): void {
+    this.context.answers = { ...this.context.answers, ...answers };
+  }
+
+  /**
    * 获取当前步骤状态
    */
   public getCurrentStep(): FlowStepState {

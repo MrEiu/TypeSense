@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { NButton } from 'naive-ui';
-import { Check } from 'lucide-vue-next';
+import { Check, Sparkles } from 'lucide-vue-next';
 import { animate, spring, stagger } from 'motion';
 import type { QuestionItemModel } from '../../schema/questionnaire-schema-types';
 import { questionRegistry } from '../../questions/registry';
@@ -11,6 +11,7 @@ const props = defineProps<{
   seqNumber: number;
   totalQuestions: number;
   currentAnswer?: unknown;
+  isAiPrefilled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -95,6 +96,12 @@ watch(
       <p v-if="question.description" class="sub-prompt">
         {{ question.description }}
       </p>
+
+      <!-- AI 预填轻量提示条 -->
+      <div v-if="isAiPrefilled" class="ai-prefilled-chip">
+        <Sparkles :size="13" class="ai-chip-icon" />
+        <span>AI 已预填本题，可直接核对确认或修改</span>
+      </div>
     </div>
 
     <!-- 交互主体：完全由题目插件系统动态驱动 -->
@@ -189,10 +196,29 @@ watch(
 }
 
 .sub-prompt {
-  font-size: 0.96rem;
+  font-size: 0.98rem;
   color: #64748b;
   line-height: 1.6;
   margin: 10px 0 0 46px;
+}
+
+.ai-prefilled-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin: 10px 0 0 46px;
+  background: rgba(79, 70, 229, 0.08);
+  border: 1px solid rgba(79, 70, 229, 0.2);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #4f46e5;
+}
+
+.ai-chip-icon {
+  flex-shrink: 0;
+  color: #4f46e5;
 }
 
 .interactive-body {

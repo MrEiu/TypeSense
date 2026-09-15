@@ -13,7 +13,9 @@ import OpenAI from 'openai';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.resolve(__dirname, '../data');
-const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const RUNTIME_DIR = path.join(DATA_DIR, 'runtime');
+const CONFIG_FILE = path.join(RUNTIME_DIR, 'config.json');
+const LEGACY_CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
 export interface ModelConfig {
   baseURL: string;
@@ -23,12 +25,18 @@ export interface ModelConfig {
 
 export class ConfigService {
   /**
-   * 读取当前配置 (优先从 data/config.json，其次兜底环境变量)
+   * Read current configuration (prioritizing data/runtime/config.json, with legacy and env fallbacks)
    */
   public static getConfig(): ModelConfig {
-    if (fs.existsSync(CONFIG_FILE)) {
+    const targetFile = fs.existsSync(CONFIG_FILE)
+      ? CONFIG_FILE
+      : fs.existsSync(LEGACY_CONFIG_FILE)
+      ? LEGACY_CONFIG_FILE
+      : null;
+
+    if (targetFile) {
       try {
-        const raw = fs.readFileSync(CONFIG_FILE, 'utf-8');
+        const raw = fs.readFileSync(targetFile, 'utf-8');
         const parsed = JSON.parse(raw);
         return {
           baseURL: parsed.baseURL || process.env.OPENAI_BASE_URL || '',
@@ -36,7 +44,7 @@ export class ConfigService {
           model: parsed.model || process.env.OPENAI_MODEL || '',
         };
       } catch (err) {
-        console.warn('[ConfigService] 解析 config.json 失败:', err);
+        console.warn('[ConfigService] Parse config.json error:', err);
       }
     }
 
@@ -48,11 +56,11 @@ export class ConfigService {
   }
 
   /**
-   * 保存配置到 data/config.json
+   * Save configuration to data/runtime/config.json
    */
   public static saveConfig(config: Partial<ModelConfig>): ModelConfig {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(RUNTIME_DIR)) {
+      fs.mkdirSync(RUNTIME_DIR, { recursive: true });
     }
 
     const current = this.getConfig();

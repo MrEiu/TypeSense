@@ -1,13 +1,13 @@
 /**
  * server/ai-chat-filler-service.ts
  *
- * AI 自然对话辅助填写服务
- * 职责：
- * 1. 纯增量服务：复用 ConfigService 与 LlmLogger；
- * 2. 破冰引导：首轮 (messages为空) 依据问卷 title 与 description 生成自然开放式开场白；
- * 3. 伴随式抽取：挂载 record_extracted_answers 工具，通过 Tool Calling 分离聊天文本与结构化更新；
- * 4. 系统级合法性校验：严格校验题目存在性、0-based 索引范围、数组去重排序、文本 trim 与量表格式；
- * 5. 极简原则：不推行强制完成、无过度追问、不脑补虚假事实。
+ * AI Conversational Survey Filler Service (Partial Auto-Filler)
+ * Responsibilities:
+ * 1. Incremental service reusing ConfigService and LlmLogger.
+ * 2. Cold-start opening generation based on survey title and overview.
+ * 3. Two-stage tool calling: record_extracted_answers decouples updates and continuation decision.
+ * 4. Strict server-side validation: verifies question existence, bounds, normalization.
+ * 5. Proactive stop principle: extracts high-value answers in 1-2 turns, avoids questionnaire fatigue.
  */
 
 import OpenAI from 'openai';
@@ -41,6 +41,7 @@ export interface ChatFillerResponse {
   success: boolean;
   reply: string;
   updates: ExtractedAnswerUpdate[];
+  should_continue?: boolean;
 }
 
 export class AiChatFillerService {
@@ -78,23 +79,34 @@ export class AiChatFillerService {
     // 2. Build question schema summary for LLM context
     const questionsContext = this.buildCompactQuestionsContext(survey.questions, currentAnswers);
 
-    const systemPrompt = `你是一个高效、专注于问卷信息采集的交流助手。
-受访者正在以自然交谈的方式向你提供情况，后台对应着一份标准问卷。
+    const systemPrompt = `你是一个克制、高效且敏锐的问卷【AI 部分自动填写助手】（Partial Auto-Filler）。
+受访者正在以自然轻松的方式交流，系统后台对应着一份标准问卷。
 
-【最高核心原则】：
-自然对话不等于自由闲聊！你的每一次发言，都必须整体服务于问卷信息获取、澄清或自然收束，严禁产生纯粹为了维持聊天气氛的无效闲聊。
+【最高核心定位与产品边界】：
+1. 你的定位是“部分自动填写器”，绝不追求完成整份问卷，也不把完成率作为目标！
+2. 你的任务是通过 1~2 轮轻松自然、低沟通成本的简短交流，帮助受访者提前提取最适合自然语言表达的若干核心答案。
+3. 【部分完成即是完全成功】：一份数十题的标准问卷，通过对话仅提取出几道题即可圆满结束，剩余题目全部留给受访者回到标准问卷自主勾选。
+4. 严禁把问卷题目按顺序逐条盘问！严禁像考官一样逐题审讯！严禁试图把整份问卷全部聊完！
 
-【核心决策四步法（每轮严格遵守）】：
-第 1 步：解析用户刚才提供了什么信息？
-第 2 步：这些信息对应哪些标准问题？通过工具 record_extracted_answers 写入合法答案（“用户说到什么就提取什么；明确多少就填写多少；宁可少填，绝不脑补”）。
-第 3 步：判断是否还有高价值缺口需要跟进？
-  - 优先级法则：优先处理与用户当前表述【语义关联度最高】的未答题目（相关性 > 题目物理序号！）。
-  - 若有明确且高价值的缺口：采用自然的短承接（如“39度这个我记下了。”），顺势提出 1 个最关键的追问；
-  - 若无明确缺口，或用户表述已经非常自洽完整：简短确认即可（如“好的，这些情况已为你记录。”），绝不为了提问而强行找茬提问！
-第 4 步：严禁无意义废话！
-  - 严禁出现与问卷无关的闲聊（天气、爱好、日常问候）；
-  - 严禁空洞套话（如“我明白你的意思了，请继续聊聊~”）；
-  - 严禁尬聊拖延（如“还有吗？”、“继续说”、“你还想聊些什么？”）。
+【通用题型边界过滤原则】：
+- 适合通过对话提取的：受访者开放陈述中直接体现的客观事实、核心感受或明确的选择意向；
+- 绝对不追问、必须留给受访者在标准问卷自主填写的：需要受访者精确阅读选项长文本、逐项对照、多条目密集打分（如复杂的矩阵量表）、涉及个人身份登记或容易产生误判的精细题目。对这类问题绝对不要发起追问。
+
+【每轮双重独立决策（必须通过调用 record_extracted_answers 工具提交）】：
+每轮接收到受访者发言后，你必须独立做出以下两项决策：
+决策 A (updates)：
+  - 从用户当前发言及上下文中，提取能够明确映射到问卷已有题目的确定答案。
+  - 用户说到什么就提取什么；明确多少就填写多少；宁可少填，绝不脑补或主观猜测。
+决策 B (should_continue)：
+  - 判定是否值得再进行一轮追问（布尔值）：
+  - 若用户当前表述已经回答了前面的讨论、或者剩余未答题目并不适合低成本自然追问、或者边际增益低（即需要用户费力回忆或多轮确认），必须坚决将 should_continue 设为 false！
+  - 只有当当前存在极其顺畅、低成本、高置信度的一个关键缺口（例如刚才提到的核心情况还差一个最直观的维度，且顺理成章）时，才设为 true；
+  - 对话通常在 1~2 轮后即可主动收束。
+
+【交互与回复规范】：
+- 严禁脱离问卷主题的无效闲聊（严禁寒暄天气、日常爱好、随便聊聊等）；
+- 严禁机械单调的无意义回复（如单纯回复“好的”）；
+- 工具调用 record_extracted_answers 专用于提交 updates 与 should_continue 结构化决策。
 
 【答案格式规范（严格遵守）】：
 - 单选题 (single_choice)：answer 必须是对应选项的 0-based 整数索引（如 0, 1, 2...），严禁返回选项文字！
@@ -107,19 +119,19 @@ export class AiChatFillerService {
 ${questionsContext}
 `;
 
-    // 3. Define Tool for structured extraction
+    // 3. Define Tool for structured extraction (Pure data extraction, no reply pollution)
     const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       {
         type: 'function',
         function: {
           name: 'record_extracted_answers',
-          description: '从用户的自然表达中提取能够明确映射到问卷已有题目的标准答案',
+          description: '从用户的自然表达中提取能够明确映射到问卷已有题目的标准答案，并决定是否继续追问',
           parameters: {
             type: 'object',
             properties: {
               updates: {
                 type: 'array',
-                description: '提取出的明确题目答案列表',
+                description: '提取出的明确题目答案列表（宁缺毋滥，未提及不填）',
                 items: {
                   type: 'object',
                   properties: {
@@ -145,8 +157,13 @@ ${questionsContext}
                   required: ['question_id', 'answer', 'confidence', 'evidence'],
                 },
               },
+              should_continue: {
+                type: 'boolean',
+                description:
+                  '是否继续追问下一轮：true=当前讨论存在极其顺畅、低成本、高置信度的一个自然追问方向；false=已获取到当前交流的有效信息，剩余题目更适合受访者在标准问卷中自主阅题勾选，本次对话应主动收束结束。',
+              },
             },
-            required: ['updates'],
+            required: ['updates', 'should_continue'],
           },
         },
       },
@@ -158,6 +175,7 @@ ${questionsContext}
       content: m.content,
     }));
 
+    // Stage 1: Call LLM with tool definitions
     const createParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model: ai.model,
       messages: [{ role: 'system', content: systemPrompt }, ...recentMessages],
@@ -167,7 +185,7 @@ ${questionsContext}
     };
 
     const completion = await LlmLogger.callAndLog(
-      'ai-chat-filler-turn',
+      'ai-chat-filler-stage1',
       ai,
       createParams,
       { surveyId: survey.id, messageCount: messages.length }
@@ -178,18 +196,22 @@ ${questionsContext}
       throw new Error('LLM 未返回有效内容');
     }
 
-    let reply = choice.message?.content || '';
+    let reply = choice.message?.content?.trim() || '';
     const rawUpdates: any[] = [];
+    let shouldContinue = false;
 
     // Parse tool calls if any
     const toolCalls = choice.message?.tool_calls;
-    if (Array.isArray(toolCalls)) {
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
       for (const call of toolCalls) {
         if (call.function?.name === 'record_extracted_answers') {
           try {
             const parsedArgs = JSON.parse(call.function.arguments || '{}');
             if (Array.isArray(parsedArgs.updates)) {
               rawUpdates.push(...parsedArgs.updates);
+            }
+            if (typeof parsedArgs.should_continue === 'boolean') {
+              shouldContinue = parsedArgs.should_continue;
             }
           } catch (e) {
             console.warn('[AiChatFiller] Failed to parse tool arguments:', e);
@@ -201,12 +223,71 @@ ${questionsContext}
     // 4. Strict System-level validation
     const validUpdates = this.validateAndNormalizeUpdates(survey.questions, rawUpdates);
 
-    // If reply is empty, supply a concise, zero-waste confirmation
+    // 5. Stage 2: If tool was called, pass tool result back to LLM for coherent natural language reply
+    if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+      const guidanceText = shouldContinue
+        ? '请针对刚才受访者提到的核心情况，进行一句最自然、低沟通成本的简短追问（仅限 1 个问题，严禁连环发问或机械读题干）。'
+        : '受访者提供的信息已记录完成。请输出一句简短亲切的收束语，告知已记录刚才提到的情况，并礼貌引导其返回标准问卷完成剩余题目（例如：“好的，刚才提到的情况已经帮您先记录好啦，剩余内容您可以回到问卷继续填写~”），严禁再提任何新问题！';
+
+      const secondTurnMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        { role: 'system', content: systemPrompt },
+        ...recentMessages,
+        choice.message, // The assistant message with tool_calls
+      ];
+
+      for (const call of toolCalls) {
+        secondTurnMessages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({
+            success: true,
+            recordedCount: validUpdates.length,
+            recordedQuestions: validUpdates.map((u) => ({
+              question_id: u.question_id,
+              title: u.question_title,
+              answer: u.display_text,
+            })),
+            should_continue: shouldContinue,
+            guidance: guidanceText,
+          }),
+        });
+      }
+
+      try {
+        const secondCompletion = await LlmLogger.callAndLog(
+          'ai-chat-filler-stage2-reply',
+          ai,
+          {
+            model: ai.model,
+            messages: secondTurnMessages,
+            temperature: 0.4,
+          },
+          { surveyId: survey.id, stage: 'second_turn_reply', should_continue: shouldContinue }
+        );
+
+        const secondReply = secondCompletion.choices?.[0]?.message?.content?.trim();
+        if (secondReply) {
+          reply = secondReply;
+        }
+      } catch (err) {
+        console.warn('[AiChatFiller] Stage 2 reply generation failed, falling back:', err);
+      }
+    }
+
+    // Zero-waste safety fallback
     if (!reply.trim()) {
-      if (validUpdates.length > 0) {
-        reply = '好的，相关情况已为你记录。';
+      if (!shouldContinue) {
+        if (validUpdates.length > 0) {
+          reply = '好的，刚才提到的情况已经帮您先记录好啦，剩余内容您可以回到问卷继续填写~';
+        } else {
+          reply = '好的，您可以随时返回问卷继续填写~';
+        }
       } else {
-        reply = '好的。';
+        if (validUpdates.length > 0) {
+          reply = '好的，相关情况已经为你记下。';
+        } else {
+          reply = '请继续说说您的具体情况~';
+        }
       }
     }
 
@@ -214,6 +295,7 @@ ${questionsContext}
       success: true,
       reply,
       updates: validUpdates,
+      should_continue: shouldContinue,
     };
   }
 
@@ -229,15 +311,15 @@ ${questionsContext}
       .map((q) => q.title)
       .join('、');
 
-    const prompt = `你是一个专业、亲切的问卷交流助手。用户正准备填写一份问卷。
+    const prompt = `你是一个专业、自然的问卷填写辅助助手（定位：AI 部分自动填写助手）。受访者正准备填写一份问卷。
 问卷标题：《${survey.title || '本次调研'}》
 问卷说明：${survey.description || '暂无详细描述'}
 主要涉及方向：${previewQuestions || '相关情况'}
 
 请生成一句简短、自然、具有明确切入方向的开场问候（1~2 句话）：
-1. 欢迎用户，并结合问卷主题与涉及方向，给出明确的切入点（例如：“你可以先说说你目前在[...]方面的具体情况，想到什么说什么即可”）；
-2. 给出具体方向，让用户知道从何说起，绝不让用户大海捞针自己找话题，但表达要开放轻松；
-3. 严禁机械抛出第一道标准题目（绝不要像考官一样问第一题！）。`;
+1. 欢迎受访者，说明只需简单聊两句大概情况，AI 会协助提取部分信息，无需有答题压力；
+2. 结合问卷主题与方向，给出一个最直观轻松的切入点（例如：“你可以先简单说说目前在[...]方面的大致情况，想到什么说什么即可~”）；
+3. 严禁机械抛出具体标准题目的序号或完整题干；严禁承诺“会帮你全部填完”。`;
 
     const createParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model: ai.model,
@@ -255,12 +337,13 @@ ${questionsContext}
 
     const reply =
       completion.choices?.[0]?.message?.content?.trim() ||
-      `你好！这份问卷主要了解关于「${survey.title}」的情况。你可以先直接说说你的主要情况，想到什么说什么即可~`;
+      `你好！这份问卷主要了解关于「${survey.title}」的情况。你可以先简单说说你的主要情况，我会帮你把涉及的内容先记录好，剩余题目也可以稍后在问卷中查看~`;
 
     return {
       success: true,
       reply,
       updates: [],
+      should_continue: true,
     };
   }
 
