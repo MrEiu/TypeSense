@@ -30,6 +30,10 @@ const props = withDefaults(
   }
 );
 
+const emit = defineEmits<{
+  (e: 'select-question', id: string): void;
+}>();
+
 const { fitView, zoomIn, zoomOut, getZoom } = useVueFlow();
 
 const nodes = ref<Node[]>([]);
@@ -109,6 +113,7 @@ onMounted(() => {
       :max-zoom="2.5"
       :fit-view-on-init="true"
       @pane-scroll="updateZoomIndicator"
+      @node-click="(e) => emit('select-question', e.node.id)"
     >
       <Background :gap="24" :size="1.2" pattern-color="rgba(255, 255, 255, 0.08)" />
 

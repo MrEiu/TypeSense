@@ -1,5 +1,36 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, markRaw } from 'vue';
+import { ref, onMounted, computed, watch, h } from 'vue';
+import {
+  NConfigProvider,
+  NMessageProvider,
+  NNotificationProvider,
+  NDialogProvider,
+  useMessage,
+  useDialog,
+  NLayout,
+  NLayoutHeader,
+  NLayoutSider,
+  NLayoutContent,
+  NSpace,
+  NCard,
+  NButton,
+  NInput,
+  NSelect,
+  NSwitch,
+  NTag,
+  NTooltip,
+  NSpin,
+  NEmpty,
+  NPopconfirm,
+  NRadioGroup,
+  NRadioButton,
+  NModal,
+  NDrawer,
+  NDropdown,
+  type GlobalThemeOverrides,
+  type SelectOption,
+  type DropdownOption,
+} from 'naive-ui';
 import {
   ExternalLink,
   ArrowLeft,
@@ -14,6 +45,15 @@ import {
   Edit3,
   Check,
   AlertCircle,
+  Sparkles,
+  Search,
+  Sliders,
+  Maximize2,
+  Eye,
+  Settings,
+  Layers,
+  HelpCircle,
+  FileText,
 } from 'lucide-vue-next';
 import { QuestionnaireRepositoryService } from '../services/questionnaire-repository-service';
 import type {
@@ -23,43 +63,32 @@ import type {
   JumpRule,
 } from '../schema/questionnaire-schema-types';
 import SurveyFlowCanvas from '../canvas/components/SurveyFlowCanvas.vue';
-import {
-  TsButton,
-  TsInput,
-  TsTextarea,
-  TsSelect,
-  TsSwitch,
-  TsBadge,
-  TsCard,
-  TsSegmented,
-  type SelectOption,
-  type SegmentOption,
-} from '../components/ui';
 
-// 动态状态
+// 统一浅色主题配置（与控制台保持极致一致）
+const themeOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#4f46e5',
+    primaryColorHover: '#4338ca',
+    primaryColorPressed: '#3730a3',
+    primaryColorSuppl: '#4f46e5',
+    borderRadius: '8px',
+  },
+  Card: {
+    borderRadius: '10px',
+  },
+};
+
+// 状态管理
 const isLoading = ref(true);
 const isSaving = ref(false);
-const saveSuccessToast = ref(false);
 const isDirty = ref(false);
 const currentSurveyId = ref('');
 const questionnaire = ref<QuestionnaireModel | null>(null);
 const allSurveys = ref<Array<{ id: string; title: string; slug?: string }>>([]);
+const outlineSearchQuery = ref('');
 
-// 视图模式: 'flow' 流程拓扑 | 'editor' 题目与逻辑编排
-const viewMode = ref<string>('editor');
-
-const viewModeOptions: SegmentOption[] = [
-  { label: '逻辑编排', value: 'editor', icon: markRaw(ListOrdered) },
-  { label: '流程拓扑', value: 'flow', icon: markRaw(GitBranch) },
-];
-
-// 题型选项
-const questionTypeOptions: SelectOption[] = [
-  { label: '单选题 (Single Choice)', value: 'single_choice' },
-  { label: '多选题 (Multiple Choice)', value: 'multiple_choice' },
-  { label: '量表评分 (Likert Scale)', value: 'likert_scale' },
-  { label: '开放问答 (Text Input)', value: 'text_input' },
-];
+// 视图模式: 'editor' 逻辑大纲与属性编排 | 'flow' 流程拓扑全屏 | 'split' 左右分屏联动
+const viewMode = ref<'editor' | 'flow' | 'split'>('editor');
 
 // 当前选中的题目索引
 const activeQuestionIndex = ref(0);
@@ -67,6 +96,35 @@ const activeQuestionIndex = ref(0);
 // 标题行内编辑
 const isEditingTitle = ref(false);
 const tempTitle = ref('');
+
+// 批量添加选项弹窗
+const showBatchOptionModal = ref(false);
+const batchOptionText = ref('');
+
+// 题型选项
+const questionTypeOptions: SelectOption[] = [
+  { label: '单选题 (Single Choice)', value: 'single_choice' },
+  { label: '多选题 (Multiple Choice)', value: 'multiple_choice' },
+  { label: '李克特量表 (Likert Scale)', value: 'likert_scale' },
+  { label: '开放问答 (Text Input)', value: 'text_input' },
+];
+
+// 添加题目下拉菜单选项
+const addQuestionDropdownOptions: DropdownOption[] = [
+  { label: '单选题 (Single Choice)', key: 'single_choice' },
+  { label: '多选题 (Multiple Choice)', key: 'multiple_choice' },
+  { label: '李克特量表 (Likert Scale)', key: 'likert_scale' },
+  { label: '开放问答 (Text Input)', key: 'text_input' },
+];
+
+// 量表预设刻度选项
+const likertPresetOptions: DropdownOption[] = [
+  { label: '5 级满意度 (非常不满意 ~ 非常满意)', key: 'satisfaction_5' },
+  { label: '5 级赞同度 (完全不同意 ~ 完全同意)', key: 'agreement_5' },
+  { label: '3 级评价 (不满意 / 一般 / 满意)', key: 'eval_3' },
+  { label: '5 级符合度 (完全不符合 ~ 完全符合)', key: 'match_5' },
+  { label: '10 阶评分 (0 ~ 10 分)', key: 'nps_10' },
+];
 
 const currentQuestion = computed<QuestionItemModel | undefined>(() => {
   return questionnaire.value?.questions[activeQuestionIndex.value];
@@ -85,11 +143,27 @@ const surveySelectOptions = computed<SelectOption[]>(() => {
   }));
 });
 
+const filteredQuestions = computed(() => {
+  if (!questionnaire.value) return [];
+  if (!outlineSearchQuery.value.trim()) {
+    return questionnaire.value.questions.map((q, idx) => ({ q, idx }));
+  }
+  const query = outlineSearchQuery.value.toLowerCase().trim();
+  return questionnaire.value.questions
+    .map((q, idx) => ({ q, idx }))
+    .filter(
+      ({ q, idx }) =>
+        `q${idx + 1}`.includes(query) ||
+        q.title.toLowerCase().includes(query) ||
+        (q.description && q.description.toLowerCase().includes(query))
+    );
+});
+
 // 跳转目标选项列表
 const jumpTargetOptions = computed<SelectOption[]>(() => {
   if (!questionnaire.value) return [];
   const list: SelectOption[] = questionnaire.value.questions.map((q, idx) => ({
-    label: `Q${idx + 1}: ${q.title}`,
+    label: `Q${idx + 1}: ${q.title.slice(0, 24)}${q.title.length > 24 ? '...' : ''}`,
     value: q.id,
   }));
   list.push({ label: '🏁 正常结束作答 (End)', value: 'end' });
@@ -97,16 +171,8 @@ const jumpTargetOptions = computed<SelectOption[]>(() => {
   return list;
 });
 
-// 当前题目的选项列表下拉
-function getQuestionOptionChoices(): SelectOption[] {
-  if (!currentQuestion.value || !Array.isArray(currentQuestion.value.options)) return [];
-  return currentQuestion.value.options.map((opt, idx) => {
-    const text = typeof opt === 'string' ? opt : opt.label;
-    return {
-      label: `选项 ${String.fromCharCode(65 + idx)}: ${text}`,
-      value: idx,
-    };
-  });
+function markDirty() {
+  isDirty.value = true;
 }
 
 // 题型切换深度转换与自适应初始化
@@ -121,13 +187,12 @@ function handleQuestionTypeChange(newType: string | number) {
     }
   } else if (targetType === 'likert_scale') {
     if (!currentQuestion.value.statements || currentQuestion.value.statements.length === 0) {
-      currentQuestion.value.statements = ['条目 1', '条目 2', '条目 3'];
+      currentQuestion.value.statements = ['整体表现与综合体验', '服务响应与处理效率', '交付质量与期望符合度'];
     }
     if (!currentQuestion.value.options || currentQuestion.value.options.length < 2) {
-      currentQuestion.value.options = ['1', '2', '3', '4', '5'];
+      currentQuestion.value.options = ['非常不满意', '不满意', '一般', '满意', '非常满意'];
     }
   } else if (targetType === 'single_choice' || targetType === 'multiple_choice') {
-    // 确保选择题有基础选项
     if (!currentQuestion.value.options || currentQuestion.value.options.length === 0) {
       currentQuestion.value.options = ['选项 1', '选项 2', '选项 3'];
     }
@@ -167,6 +232,21 @@ function selectQuestion(index: number) {
   }
 }
 
+function handleCanvasSelectQuestion(nodeId: string) {
+  if (!questionnaire.value) return;
+  const idx = questionnaire.value.questions.findIndex((q) => q.id === nodeId);
+  if (idx >= 0) {
+    activeQuestionIndex.value = idx;
+    if (viewMode.value === 'flow') {
+      viewMode.value = 'split';
+    }
+  }
+}
+
+function handleAddQuestionDropdown(key: string | number) {
+  addQuestion(String(key) as QuestionKind);
+}
+
 function addQuestion(type: QuestionKind = 'single_choice') {
   if (!questionnaire.value) return;
   const count = questionnaire.value.questions.length + 1;
@@ -183,7 +263,7 @@ function addQuestion(type: QuestionKind = 'single_choice') {
       '界面排版美观，视觉舒适',
       '整体产品体验符合我的预期',
     ];
-    defaultOptions = ['完全不赞同', '不太赞同', '中立', '比较赞同', '非常赞同'];
+    defaultOptions = ['非常不满意', '不满意', '一般', '满意', '非常满意'];
   }
 
   const newQ: QuestionItemModel = {
@@ -203,7 +283,6 @@ function addQuestion(type: QuestionKind = 'single_choice') {
 function deleteQuestion(index: number) {
   if (!questionnaire.value) return;
   if (questionnaire.value.questions.length <= 1) {
-    alert('问卷至少需保留一道题目');
     return;
   }
   questionnaire.value.questions.splice(index, 1);
@@ -252,7 +331,6 @@ function addStatement() {
 function removeStatement(stmtIndex: number) {
   if (!currentQuestion.value || !Array.isArray(currentQuestion.value.statements)) return;
   if (currentQuestion.value.statements.length <= 1) {
-    alert('量表题至少需保留一个评测条目');
     return;
   }
   currentQuestion.value.statements.splice(stmtIndex, 1);
@@ -263,7 +341,7 @@ function updateStatementText(stmtIndex: number, text: string) {
   if (!currentQuestion.value || !Array.isArray(currentQuestion.value.statements)) return;
   const target = currentQuestion.value.statements[stmtIndex];
   if (typeof target === 'object' && target !== null) {
-    target.label = text;
+    (target as any).label = text;
   } else {
     currentQuestion.value.statements[stmtIndex] = text;
   }
@@ -286,7 +364,6 @@ function addOption() {
 function removeOption(optIndex: number) {
   if (!currentQuestion.value || !Array.isArray(currentQuestion.value.options)) return;
   if (currentQuestion.value.options.length <= 1) {
-    alert('至少需保留一个选项或刻度');
     return;
   }
   currentQuestion.value.options.splice(optIndex, 1);
@@ -295,11 +372,57 @@ function removeOption(optIndex: number) {
 
 function updateOptionText(optIndex: number, text: string) {
   if (!currentQuestion.value || !Array.isArray(currentQuestion.value.options)) return;
-  currentQuestion.value.options[optIndex] = text;
+  const target = currentQuestion.value.options[optIndex];
+  if (typeof target === 'object' && target !== null) {
+    (target as any).label = text;
+  } else {
+    currentQuestion.value.options[optIndex] = text;
+  }
   markDirty();
 }
 
-// 跳转逻辑规则 (仅关注具体选项条件跳转 when)
+function applyLikertPreset(presetKey: string | number) {
+  if (!currentQuestion.value) return;
+  switch (presetKey) {
+    case 'satisfaction_5':
+      currentQuestion.value.options = ['非常不满意', '不满意', '一般', '满意', '非常满意'];
+      break;
+    case 'agreement_5':
+      currentQuestion.value.options = ['完全不同意', '不同意', '一般', '同意', '完全同意'];
+      break;
+    case 'eval_3':
+      currentQuestion.value.options = ['差', '一般', '满意'];
+      break;
+    case 'match_5':
+      currentQuestion.value.options = ['完全不符合', '不太符合', '一般', '比较符合', '完全符合'];
+      break;
+    case 'nps_10':
+      currentQuestion.value.options = ['0分', '1分', '2分', '3分', '4分', '5分', '6分', '7分', '8分', '9分', '10分'];
+      break;
+  }
+  markDirty();
+}
+
+// 批量添加选项
+function openBatchOptionModal() {
+  batchOptionText.value = '';
+  showBatchOptionModal.value = true;
+}
+
+function handleApplyBatchOptions() {
+  if (!currentQuestion.value) return;
+  const lines = batchOptionText.value
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length > 0) {
+    currentQuestion.value.options = lines;
+    markDirty();
+  }
+  showBatchOptionModal.value = false;
+}
+
+// 跳转逻辑规则
 function getConditionalJumpRules(): JumpRule[] {
   if (!currentQuestion.value || !currentQuestion.value.jump) return [];
   if (typeof currentQuestion.value.jump === 'string') return [];
@@ -315,9 +438,12 @@ function addJumpRule() {
     currentQuestion.value.jump = [];
   }
   const qId = currentQuestion.value.id;
+  const defaultTarget =
+    questionnaire.value.questions[activeQuestionIndex.value + 1]?.id || 'end';
+
   (currentQuestion.value.jump as JumpRule[]).push({
     when: { [qId]: 0 },
-    to: questionnaire.value.questions[0]?.id || 'end',
+    to: defaultTarget,
   });
   markDirty();
 }
@@ -334,12 +460,20 @@ function removeJumpRule(rule: JumpRule) {
   markDirty();
 }
 
-function markDirty() {
-  isDirty.value = true;
+function updateRuleOptionChoice(rule: JumpRule, optionIndex: number) {
+  if (!currentQuestion.value) return;
+  const qId = currentQuestion.value.id;
+  rule.when = { [qId]: optionIndex };
+  markDirty();
+}
+
+function updateRuleTarget(rule: JumpRule, targetId: string) {
+  rule.to = targetId;
+  markDirty();
 }
 
 // 保存问卷到数据库
-async function handleSave() {
+async function handleSave(notifyMsg?: any) {
   if (!questionnaire.value || isSaving.value) return;
   isSaving.value = true;
   try {
@@ -350,16 +484,15 @@ async function handleSave() {
     );
     if (success) {
       isDirty.value = false;
-      saveSuccessToast.value = true;
-      setTimeout(() => {
-        saveSuccessToast.value = false;
-      }, 2000);
+      if (notifyMsg) {
+        notifyMsg.success('问卷已成功保存至数据库');
+      }
     } else {
-      alert('保存问卷失败，请检查后端状态');
+      if (notifyMsg) notifyMsg.error('保存问卷失败，请检查后端状态');
     }
   } catch (err) {
     console.error('[Studio] 保存问卷异常:', err);
-    alert('保存问卷网络异常');
+    if (notifyMsg) notifyMsg.error('保存问卷网络异常');
   } finally {
     isSaving.value = false;
   }
@@ -389,13 +522,13 @@ function getQuestionTypeName(type: QuestionKind) {
     case 'likert_scale':
       return '量表';
     case 'text_input':
-      return '填空';
+      return '问答';
     default:
       return '题目';
   }
 }
 
-function getQuestionTypeBadgeVariant(type: QuestionKind): 'primary' | 'info' | 'success' | 'warning' | 'neutral' {
+function getQuestionTypeTagType(type: QuestionKind): 'primary' | 'info' | 'success' | 'warning' | 'default' {
   switch (type) {
     case 'single_choice':
       return 'primary';
@@ -406,23 +539,17 @@ function getQuestionTypeBadgeVariant(type: QuestionKind): 'primary' | 'info' | '
     case 'text_input':
       return 'warning';
     default:
-      return 'neutral';
+      return 'default';
   }
 }
 
-// 点击返回直接关闭当前工作台标签页
+// 返回控制台
 function handleClosePage() {
-  window.close();
-  // 容错降级：若浏览器对非 script 打开的页面限制 window.close()，自动回退上一页
-  setTimeout(() => {
-    if (!window.closed) {
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.location.href = '/';
-      }
-    }
-  }, 120);
+  if (window.history.length > 1) {
+    window.history.back();
+  } else {
+    window.location.href = '/';
+  }
 }
 
 onMounted(async () => {
@@ -456,510 +583,645 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="studio-root">
-    <!-- 顶部工作台顶栏 -->
-    <header class="studio-header">
-      <div class="header-left">
-        <TsButton
-          variant="ghost"
-          size="sm"
-          title="关闭工作台并返回控制台"
-          @click="handleClosePage"
-        >
-          <ArrowLeft style="width: 15px; height: 15px;" />
-        </TsButton>
-
-        <div class="brand-group">
-          <TsBadge variant="primary" size="sm">STUDIO</TsBadge>
-          <span class="brand-name">TypeSense</span>
-        </div>
-
-        <div class="divider-v"></div>
-
-        <!-- 问卷标题 (行内即时编辑) -->
-        <div v-if="questionnaire" class="title-area">
-          <div v-if="!isEditingTitle" class="title-display" @click="startEditTitle" title="点击编辑问卷标题">
-            <span class="title-text">{{ questionnaire.title }}</span>
-            <Edit3 style="width: 12px; height: 12px; opacity: 0.5;" />
-          </div>
-          <TsInput
-            v-else
-            v-model="tempTitle"
-            size="sm"
-            style="width: 260px;"
-            autofocus
-            @blur="finishEditTitle"
-            @change="finishEditTitle"
-          />
-        </div>
-      </div>
-
-      <!-- 中心视图模式分段器 (TsSegmented) -->
-      <div class="header-center">
-        <TsSegmented
-          v-model="viewMode"
-          :options="viewModeOptions"
-          size="sm"
-        />
-      </div>
-
-      <!-- 右侧操作栏 (TsButton + TsSelect) -->
-      <div class="header-right">
-        <!-- 切换问卷 -->
-        <TsSelect
-          v-if="allSurveys.length > 1"
-          :model-value="currentSurveyId"
-          :options="surveySelectOptions"
-          size="sm"
-          style="min-width: 140px;"
-          @update:model-value="handleSurveyChange"
-        />
-
-        <!-- 保存按钮 -->
-        <TsButton
-          v-if="questionnaire"
-          :variant="isDirty ? 'primary' : 'secondary'"
-          size="sm"
-          :loading="isSaving"
-          @click="handleSave"
-        >
-          <Save style="width: 14px; height: 14px;" />
-          <span>{{ isDirty ? '保存改动 *' : '已保存' }}</span>
-        </TsButton>
-
-        <!-- 受访体验 -->
-        <TsButton
-          v-if="questionnaire"
-          as="a"
-          :href="respondentUrl"
-          target="_blank"
-          variant="secondary"
-          size="sm"
-          title="在新标签页体验真实作答"
-        >
-          <ExternalLink style="width: 14px; height: 14px;" />
-          <span>受访体验</span>
-        </TsButton>
-      </div>
-    </header>
-
-    <!-- 工作台主体 -->
-    <main class="studio-body">
-      <!-- 1. 加载中 -->
-      <div v-if="isLoading" class="state-stage">
-        <div class="spinner"></div>
-        <p>正在从数据库装载问卷数据...</p>
-      </div>
-
-      <!-- 2. 无问卷空状态 -->
-      <div v-else-if="!questionnaire" class="state-stage">
-        <AlertCircle style="width: 44px; height: 44px; color: #94a3b8;" />
-        <h3>未找到对应的问卷数据</h3>
-        <p>请确认问卷 ID 是否正确，或返回控制台选择问卷。</p>
-        <TsButton as="a" href="/" variant="primary" size="md">
-          ← 返回控制台
-        </TsButton>
-      </div>
-
-      <!-- 3. 流程拓扑全屏模式 -->
-      <div v-else-if="viewMode === 'flow'" class="flow-stage">
-        <SurveyFlowCanvas
-          :key="currentSurveyId"
-          :questionnaire="questionnaire"
-        />
-      </div>
-
-      <!-- 4. 逻辑与属性编排模式 (标准双栏) -->
-      <div v-else class="editor-stage">
-        <!-- 左侧题目大纲 -->
-        <aside class="outline-col">
-          <div class="outline-head">
-            <div class="outline-meta">
-              <span class="outline-label">题目大纲</span>
-              <TsBadge variant="neutral" size="sm">{{ questionnaire.questions.length }} 题</TsBadge>
-            </div>
-            <TsButton variant="primary" size="xs" @click="addQuestion('single_choice')">
-              <Plus style="width: 12px; height: 12px;" />
-              <span>添加题目</span>
-            </TsButton>
-          </div>
-
-          <div class="outline-body">
-            <div
-              v-for="(q, idx) in questionnaire.questions"
-              :key="q.id"
-              class="outline-node"
-              :class="{ selected: idx === activeQuestionIndex }"
-              @click="selectQuestion(idx)"
-            >
-              <div class="node-left">
-                <span class="node-seq">Q{{ idx + 1 }}</span>
-                <TsBadge :variant="getQuestionTypeBadgeVariant(q.type)" size="sm">
-                  {{ getQuestionTypeName(q.type) }}
-                </TsBadge>
-                <span class="node-title" :title="q.title">{{ q.title }}</span>
-              </div>
-
-              <div class="node-actions" @click.stop>
-                <span v-if="q.jump" class="node-jump-flag" title="包含分支跳转规则">⚡</span>
-                <TsButton
-                  variant="ghost"
-                  size="xs"
-                  class="action-mini-btn"
-                  :disabled="idx === 0"
-                  title="上移"
-                  @click="moveQuestion(idx, 'up')"
-                >
-                  <ChevronUp style="width: 12px; height: 12px;" />
-                </TsButton>
-                <TsButton
-                  variant="ghost"
-                  size="xs"
-                  class="action-mini-btn"
-                  :disabled="idx === questionnaire.questions.length - 1"
-                  title="下移"
-                  @click="moveQuestion(idx, 'down')"
-                >
-                  <ChevronDown style="width: 12px; height: 12px;" />
-                </TsButton>
-                <TsButton
-                  variant="ghost"
-                  size="xs"
-                  class="action-mini-btn"
-                  title="复制"
-                  @click="duplicateQuestion(idx)"
-                >
-                  <Copy style="width: 12px; height: 12px;" />
-                </TsButton>
-                <TsButton
-                  variant="ghost"
-                  size="xs"
-                  class="action-mini-btn btn-danger"
-                  title="删除"
-                  @click="deleteQuestion(idx)"
-                >
-                  <Trash2 style="width: 12px; height: 12px;" />
-                </TsButton>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <!-- 右侧题目属性与逻辑配置区 (TsCard + TsInput + TsSelect + TsSwitch) -->
-        <section class="inspector-col">
-          <div v-if="currentQuestion" class="inspector-wrapper">
-            <!-- 题目顶部摘要条 -->
-            <div class="detail-header">
-              <div class="detail-meta">
-                <span class="detail-q-tag">第 {{ activeQuestionIndex + 1 }} 题</span>
-                <TsBadge variant="neutral" size="md">{{ currentQuestion.id }}</TsBadge>
-              </div>
-
-              <div class="detail-controls">
-                <div class="ctrl-group">
-                  <label>题型：</label>
-                  <TsSelect
-                    :model-value="currentQuestion.type"
-                    :options="questionTypeOptions"
-                    size="sm"
-                    style="min-width: 180px;"
-                    @update:model-value="handleQuestionTypeChange"
-                  />
-                </div>
-
-                <TsSwitch
-                  v-model="currentQuestion.required"
-                  size="sm"
-                  label="必填项"
-                  @change="markDirty"
-                />
-              </div>
-            </div>
-
-            <!-- 基础题干与说明 (TsCard) -->
-            <TsCard padding="md" class="config-block">
-              <div class="form-row">
-                <label class="row-label">题目标题</label>
-                <TsInput
-                  v-model="currentQuestion.title"
-                  size="md"
-                  bold
-                  placeholder="请输入题目内容..."
-                  @change="markDirty"
-                />
-              </div>
-
-              <div class="form-row">
-                <label class="row-label">补充说明 (选填)</label>
-                <TsTextarea
-                  v-model="currentQuestion.description"
-                  :rows="2"
-                  placeholder="为受访者补充说明作答背景或提示..."
-                  @change="markDirty"
-                />
-              </div>
-            </TsCard>
-
-            <!-- 开放问答专属设置 (TsCard + TsInput) -->
-            <TsCard
-              v-if="currentQuestion.type === 'text_input'"
-              padding="md"
-              class="config-block"
-            >
-              <div class="section-title-row">
-                <span class="section-title">问答填空专属设置</span>
-                <TsBadge variant="warning" size="sm">开放文本题</TsBadge>
-              </div>
-              <div class="form-row">
-                <label class="row-label">输入占位提示语 (Placeholder)</label>
-                <TsInput
-                  v-model="currentQuestion.placeholder"
-                  size="sm"
-                  placeholder="例如：请详细阐述您的看法与建议..."
-                  @change="markDirty"
-                />
-              </div>
-            </TsCard>
-
-            <!-- 李克特量表专属：评测条目设置 (Statements) -->
-            <TsCard
-              v-if="currentQuestion.type === 'likert_scale'"
-              padding="md"
-              class="config-block"
-            >
-              <div class="section-title-row">
-                <div class="options-title-group">
-                  <span class="section-title">评测条目设置 (Statements)</span>
-                  <TsBadge variant="success" size="sm">
-                    共 {{ (currentQuestion.statements || []).length }} 项
-                  </TsBadge>
-                </div>
-                <TsButton variant="secondary" size="xs" @click="addStatement">
-                  <Plus style="width: 12px; height: 12px;" />
-                  <span>增加条目</span>
-                </TsButton>
-              </div>
-
-              <div class="options-container">
-                <div
-                  v-for="(stmt, sIdx) in currentQuestion.statements || []"
-                  :key="sIdx"
-                  class="option-item"
-                >
-                  <span class="stmt-num-badge">{{ sIdx + 1 }}</span>
-                  <TsInput
-                    :model-value="typeof stmt === 'string' ? stmt : stmt.label"
-                    size="sm"
-                    placeholder="输入评价条目陈述内容..."
-                    @update:model-value="(val) => updateStatementText(sIdx, val)"
-                  />
-                  <TsButton
-                    variant="ghost"
-                    size="xs"
-                    class="btn-danger"
-                    title="删除此条目"
-                    @click="removeStatement(sIdx)"
-                  >
-                    <Trash2 style="width: 13px; height: 13px;" />
-                  </TsButton>
-                </div>
-              </div>
-            </TsCard>
-
-            <!-- 选项 / 刻度列表 (单选/多选/量表) -->
-            <TsCard
-              v-if="currentQuestion.type !== 'text_input'"
-              padding="md"
-              class="config-block"
-            >
-              <div class="section-title-row">
-                <div class="options-title-group">
-                  <span class="section-title">
-                    {{ currentQuestion.type === 'likert_scale' ? '量表评分标尺 (Scale Levels)' : '选项设置' }}
-                  </span>
-                  <TsBadge
-                    v-if="currentQuestion.type === 'multiple_choice'"
-                    variant="info"
-                    size="sm"
-                  >
-                    多选题模式
-                  </TsBadge>
-                  <TsBadge
-                    v-else-if="currentQuestion.type === 'likert_scale'"
-                    variant="success"
-                    size="sm"
-                  >
-                    {{ (currentQuestion.options || []).length }} 阶刻度
-                  </TsBadge>
-                </div>
-                <TsButton variant="secondary" size="xs" @click="addOption">
-                  <Plus style="width: 12px; height: 12px;" />
-                  <span>{{ currentQuestion.type === 'likert_scale' ? '增加刻度' : '增加选项' }}</span>
-                </TsButton>
-              </div>
-
-              <div class="options-container">
-                <div
-                  v-for="(opt, oIdx) in currentQuestion.options || []"
-                  :key="oIdx"
-                  class="option-item"
-                >
-                  <span class="opt-alpha">
-                    {{ currentQuestion.type === 'likert_scale' ? oIdx + 1 : String.fromCharCode(65 + oIdx) }}
-                  </span>
-                  <TsInput
-                    :model-value="typeof opt === 'string' ? opt : opt.label"
-                    size="sm"
-                    placeholder="输入刻度/选项文案..."
-                    @update:model-value="(val) => updateOptionText(oIdx, val)"
-                  />
-                  <TsButton
-                    variant="ghost"
-                    size="xs"
-                    class="btn-danger"
-                    title="删除此项"
-                    @click="removeOption(oIdx)"
-                  >
-                    <Trash2 style="width: 13px; height: 13px;" />
-                  </TsButton>
-                </div>
-              </div>
-            </TsCard>
-
-            <!-- 条件跳转流向规则 (TsCard + TsSelect) -->
-            <TsCard padding="md" highlight class="config-block">
-              <div class="section-title-row">
-                <div class="jump-heading">
-                  <GitBranch style="width: 15px; height: 15px; color: #4f46e5;" />
-                  <span class="section-title">条件跳转流向 (Jump Logic)</span>
-                </div>
-                <TsButton variant="secondary" size="xs" @click="addJumpRule">
-                  <Plus style="width: 12px; height: 12px;" />
-                  <span>添加条件跳转</span>
-                </TsButton>
-              </div>
-
-              <!-- 未配置跳转规则 -->
-              <div
-                v-if="getConditionalJumpRules().length === 0"
-                class="jump-empty"
+  <NConfigProvider :theme-overrides="themeOverrides">
+    <NNotificationProvider placement="bottom-right">
+      <NMessageProvider>
+        <div class="studio-app-root">
+          <!-- 顶部工作台顶栏 -->
+          <header class="studio-header">
+            <div class="header-left">
+              <NButton
+                quaternary
+                circle
+                size="medium"
+                title="返回控制台"
+                @click="handleClosePage"
               >
-                当前题目未配置跳转规则，答题后将自然流转到下一题。
+                <template #icon><ArrowLeft :size="18" /></template>
+              </NButton>
+
+              <div class="brand-badge-group">
+                <span class="studio-badge">STUDIO</span>
+                <span class="brand-title">TypeSense 逻辑编排</span>
               </div>
 
-              <!-- 仅渲染具体的选项条件跳转规则 -->
-              <div v-else class="rules-list">
-                <div
-                  v-for="(rule, rIdx) in getConditionalJumpRules()"
-                  :key="rIdx"
-                  class="rule-row"
-                >
-                  <div class="rule-clause">
-                    <div class="when-wrap">
-                      <span class="clause-text">若受访者选择</span>
-                      <TsSelect
-                        :model-value="rule.when ? rule.when[currentQuestion.id] : 0"
-                        :options="getQuestionOptionChoices()"
-                        size="sm"
-                        style="min-width: 160px;"
-                        @update:model-value="(val) => {
-                          if (!rule.when) rule.when = {};
-                          rule.when[currentQuestion.id] = Number(val);
-                          markDirty();
-                        }"
+              <div class="header-v-divider"></div>
+
+              <!-- 问卷标题 (点击即可即时行内编辑) -->
+              <div v-if="questionnaire" class="title-inline-box">
+                <div v-if="!isEditingTitle" class="title-display" @click="startEditTitle" title="点击编辑问卷标题">
+                  <span class="title-text">{{ questionnaire.title }}</span>
+                  <Edit3 :size="13" class="edit-icon" />
+                </div>
+                <NInput
+                  v-else
+                  v-model:value="tempTitle"
+                  size="small"
+                  style="width: 320px;"
+                  autofocus
+                  @blur="finishEditTitle"
+                  @keyup.enter="finishEditTitle"
+                />
+              </div>
+            </div>
+
+            <!-- 中心视图模式分段切换 -->
+            <div class="header-center">
+              <NRadioGroup v-model:value="viewMode" size="small">
+                <NRadioButton value="editor">
+                  <span class="radio-btn-content"><ListOrdered :size="14" /> 逻辑编排</span>
+                </NRadioButton>
+                <NRadioButton value="split">
+                  <span class="radio-btn-content"><Layers :size="14" /> 分屏协同</span>
+                </NRadioButton>
+                <NRadioButton value="flow">
+                  <span class="radio-btn-content"><GitBranch :size="14" /> 流程拓扑</span>
+                </NRadioButton>
+              </NRadioGroup>
+            </div>
+
+            <!-- 右侧操作栏 -->
+            <div class="header-right">
+              <!-- 切换问卷 -->
+              <NSelect
+                v-if="allSurveys.length > 1"
+                :value="currentSurveyId"
+                :options="surveySelectOptions"
+                size="small"
+                style="min-width: 160px; max-width: 220px;"
+                @update:value="handleSurveyChange"
+              />
+
+              <!-- 保存按钮 -->
+              <NButton
+                :type="isDirty ? 'primary' : 'default'"
+                size="small"
+                :loading="isSaving"
+                @click="handleSave"
+              >
+                <template #icon><Save :size="14" /></template>
+                <span>{{ isDirty ? '保存改动 *' : '已保存' }}</span>
+              </NButton>
+
+              <!-- 受访体验 -->
+              <NButton
+                v-if="questionnaire"
+                tag="a"
+                :href="respondentUrl"
+                target="_blank"
+                size="small"
+                secondary
+                type="info"
+              >
+                <template #icon><ExternalLink :size="14" /></template>
+                <span>受访体验</span>
+              </NButton>
+            </div>
+          </header>
+
+          <!-- 工作台主体 -->
+          <main class="studio-main-body">
+            <!-- 1. 加载中 -->
+            <div v-if="isLoading" class="studio-state-stage">
+              <NSpin size="large" />
+              <p class="state-hint">正在从数据库装载问卷数据...</p>
+            </div>
+
+            <!-- 2. 无问卷空状态 -->
+            <div v-else-if="!questionnaire" class="studio-state-stage">
+              <AlertCircle :size="48" style="color: #94a3b8;" />
+              <h3 class="state-title">未找到对应的问卷数据</h3>
+              <p class="state-hint">请确认问卷 ID 是否正确，或返回控制台重新进入。</p>
+              <NButton type="primary" size="medium" @click="handleClosePage">
+                ← 返回控制台
+              </NButton>
+            </div>
+
+            <!-- 3. 流程拓扑全屏模式 -->
+            <div v-else-if="viewMode === 'flow'" class="flow-fullscreen-stage">
+              <SurveyFlowCanvas
+                :key="currentSurveyId"
+                :questionnaire="questionnaire"
+                @select-question="handleCanvasSelectQuestion"
+              />
+            </div>
+
+            <!-- 4. 逻辑编排 / 分屏模式 -->
+            <div v-else class="studio-workspace-container" :class="{ 'is-split-mode': viewMode === 'split' }">
+              <!-- 左侧大纲导航栏 -->
+              <aside class="outline-sidebar">
+                <div class="outline-header">
+                  <div class="outline-title-row">
+                    <span class="outline-heading">题目大纲</span>
+                    <NTag size="small" type="default" :bordered="false" round>
+                      {{ questionnaire.questions.length }} 题
+                    </NTag>
+                  </div>
+                  <div class="outline-search-row">
+                    <NInput
+                      v-model:value="outlineSearchQuery"
+                      size="small"
+                      placeholder="搜索题目序号/标题..."
+                      clearable
+                    >
+                      <template #prefix><Search :size="13" style="color: #94a3b8;" /></template>
+                    </NInput>
+                    <NDropdown
+                      trigger="click"
+                      :options="addQuestionDropdownOptions"
+                      @select="handleAddQuestionDropdown"
+                    >
+                      <NButton size="small" type="primary">
+                        <template #icon><Plus :size="14" /></template>
+                        <span>加题</span>
+                      </NButton>
+                    </NDropdown>
+                  </div>
+                </div>
+
+                <!-- 题目列表 -->
+                <div class="outline-list-scroller">
+                  <div
+                    v-for="{ q, idx } in filteredQuestions"
+                    :key="q.id"
+                    class="outline-item-card"
+                    :class="{ 'is-active': idx === activeQuestionIndex }"
+                    @click="selectQuestion(idx)"
+                  >
+                    <div class="item-main-row">
+                      <span class="item-index-label">Q{{ idx + 1 }}</span>
+                      <NTag size="tiny" :type="getQuestionTypeTagType(q.type)" :bordered="false">
+                        {{ getQuestionTypeName(q.type) }}
+                      </NTag>
+                      <span class="item-title-text" :title="q.title">{{ q.title }}</span>
+                      <span v-if="q.jump" class="item-jump-badge" title="配置了分支跳转规则">⚡</span>
+                    </div>
+
+                    <!-- 操作按钮组 -->
+                    <div class="item-actions-row" @click.stop>
+                      <NTooltip trigger="hover">
+                        <template #trigger>
+                          <NButton
+                            quaternary
+                            size="tiny"
+                            :disabled="idx === 0"
+                            @click="moveQuestion(idx, 'up')"
+                          >
+                            <template #icon><ChevronUp :size="13" /></template>
+                          </NButton>
+                        </template>
+                        上移
+                      </NTooltip>
+
+                      <NTooltip trigger="hover">
+                        <template #trigger>
+                          <NButton
+                            quaternary
+                            size="tiny"
+                            :disabled="idx === questionnaire.questions.length - 1"
+                            @click="moveQuestion(idx, 'down')"
+                          >
+                            <template #icon><ChevronDown :size="13" /></template>
+                          </NButton>
+                        </template>
+                        下移
+                      </NTooltip>
+
+                      <NTooltip trigger="hover">
+                        <template #trigger>
+                          <NButton
+                            quaternary
+                            size="tiny"
+                            @click="duplicateQuestion(idx)"
+                          >
+                            <template #icon><Copy :size="13" /></template>
+                          </NButton>
+                        </template>
+                        复制
+                      </NTooltip>
+
+                      <NPopconfirm
+                        @positive-click="deleteQuestion(idx)"
+                        positive-text="确认删除"
+                        negative-text="取消"
+                      >
+                        <template #trigger>
+                          <NButton
+                            quaternary
+                            size="tiny"
+                            type="error"
+                            :disabled="questionnaire.questions.length <= 1"
+                          >
+                            <template #icon><Trash2 :size="13" /></template>
+                          </NButton>
+                        </template>
+                        确定删除此题目？
+                      </NPopconfirm>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <!-- 中间/右侧主编辑区 -->
+              <section class="inspector-workbench">
+                <div v-if="currentQuestion" class="inspector-scroll-content">
+                  <!-- 题目主属性顶栏卡片 -->
+                  <div class="inspector-meta-card">
+                    <div class="meta-left">
+                      <span class="q-seq-badge">第 {{ activeQuestionIndex + 1 }} 题</span>
+                      <NTag size="small" type="default" :bordered="false">{{ currentQuestion.id }}</NTag>
+                    </div>
+
+                    <div class="meta-right">
+                      <div class="meta-control-item">
+                        <span class="control-label">题型：</span>
+                        <NSelect
+                          :value="currentQuestion.type"
+                          :options="questionTypeOptions"
+                          size="small"
+                          style="width: 200px;"
+                          @update:value="handleQuestionTypeChange"
+                        />
+                      </div>
+                      <div class="meta-control-item">
+                        <NSwitch
+                          v-model:value="currentQuestion.required"
+                          size="small"
+                          @update:value="markDirty"
+                        />
+                        <span class="control-label">必填</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 基础题干与说明配置 -->
+                  <div class="inspector-section-card">
+                    <div class="section-card-header">
+                      <h4 class="section-card-title">题目标题与描述</h4>
+                    </div>
+                    <div class="form-vertical-group">
+                      <div class="form-field">
+                        <label class="field-label">题干内容</label>
+                        <NInput
+                          v-model:value="currentQuestion.title"
+                          size="medium"
+                          placeholder="请输入题目内容..."
+                          clearable
+                          @update:value="markDirty"
+                        />
+                      </div>
+                      <div class="form-field">
+                        <label class="field-label">补充说明 (选填)</label>
+                        <NInput
+                          v-model:value="currentQuestion.description"
+                          type="textarea"
+                          :rows="2"
+                          placeholder="为受访者补充说明作答背景、规则或引导语..."
+                          clearable
+                          @update:value="markDirty"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 专属设置 1：李克特量表 (Statements + Options) -->
+                  <div v-if="currentQuestion.type === 'likert_scale'" class="inspector-section-card">
+                    <!-- 评测条目设置 (Statements) -->
+                    <div class="section-card-header">
+                      <div class="header-title-flex">
+                        <h4 class="section-card-title">纵向评测条目 (Statements)</h4>
+                        <NTag size="tiny" type="success" :bordered="false">
+                          共 {{ (currentQuestion.statements || []).length }} 项
+                        </NTag>
+                      </div>
+                      <NButton size="tiny" type="primary" secondary @click="addStatement">
+                        <template #icon><Plus :size="12" /></template>
+                        <span>添加条目</span>
+                      </NButton>
+                    </div>
+
+                    <div class="items-list-box">
+                      <div
+                        v-for="(stmt, sIdx) in currentQuestion.statements || []"
+                        :key="sIdx"
+                        class="edit-item-row"
+                      >
+                        <span class="row-seq-pill">{{ sIdx + 1 }}</span>
+                        <NInput
+                          :value="typeof stmt === 'string' ? stmt : (stmt as any).label"
+                          size="small"
+                          placeholder="输入评价维度或陈述内容..."
+                          @update:value="(val) => updateStatementText(sIdx, val)"
+                        />
+                        <NButton
+                          quaternary
+                          size="tiny"
+                          type="error"
+                          :disabled="(currentQuestion.statements || []).length <= 1"
+                          @click="removeStatement(sIdx)"
+                        >
+                          <template #icon><Trash2 :size="13" /></template>
+                        </NButton>
+                      </div>
+                    </div>
+
+                    <!-- 评分刻度 (Options) -->
+                    <div class="section-card-header" style="margin-top: 24px;">
+                      <div class="header-title-flex">
+                        <h4 class="section-card-title">横向评分标尺 (Scale Levels)</h4>
+                        <NTag size="tiny" type="info" :bordered="false">
+                          {{ (currentQuestion.options || []).length }} 阶刻度
+                        </NTag>
+                      </div>
+                      <div class="header-actions-flex">
+                        <NDropdown
+                          trigger="click"
+                          :options="likertPresetOptions"
+                          @select="applyLikertPreset"
+                        >
+                          <NButton size="tiny" secondary>
+                            <span>套用标准预设 ▾</span>
+                          </NButton>
+                        </NDropdown>
+                        <NButton size="tiny" type="primary" secondary @click="addOption">
+                          <template #icon><Plus :size="12" /></template>
+                          <span>增加刻度</span>
+                        </NButton>
+                      </div>
+                    </div>
+
+                    <div class="items-list-box">
+                      <div
+                        v-for="(opt, oIdx) in currentQuestion.options || []"
+                        :key="oIdx"
+                        class="edit-item-row"
+                      >
+                        <span class="row-seq-pill scale-pill">{{ oIdx + 1 }}</span>
+                        <NInput
+                          :value="typeof opt === 'string' ? opt : (opt as any).label"
+                          size="small"
+                          placeholder="刻度标签文本..."
+                          @update:value="(val) => updateOptionText(oIdx, val)"
+                        />
+                        <NButton
+                          quaternary
+                          size="tiny"
+                          type="error"
+                          :disabled="(currentQuestion.options || []).length <= 1"
+                          @click="removeOption(oIdx)"
+                        >
+                          <template #icon><Trash2 :size="13" /></template>
+                        </NButton>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 专属设置 2：单选 / 多选题选项 (Options) -->
+                  <div
+                    v-else-if="currentQuestion.type === 'single_choice' || currentQuestion.type === 'multiple_choice'"
+                    class="inspector-section-card"
+                  >
+                    <div class="section-card-header">
+                      <div class="header-title-flex">
+                        <h4 class="section-card-title">选项列表 (Options)</h4>
+                        <NTag
+                          size="tiny"
+                          :type="currentQuestion.type === 'multiple_choice' ? 'info' : 'primary'"
+                          :bordered="false"
+                        >
+                          {{ currentQuestion.type === 'multiple_choice' ? '多选题模式' : '单选题模式' }}
+                        </NTag>
+                      </div>
+                      <div class="header-actions-flex">
+                        <NButton size="tiny" secondary @click="openBatchOptionModal">
+                          <span>批量粘贴导入</span>
+                        </NButton>
+                        <NButton size="tiny" type="primary" secondary @click="addOption">
+                          <template #icon><Plus :size="12" /></template>
+                          <span>增加选项</span>
+                        </NButton>
+                      </div>
+                    </div>
+
+                    <div class="items-list-box">
+                      <div
+                        v-for="(opt, oIdx) in currentQuestion.options || []"
+                        :key="oIdx"
+                        class="edit-item-row"
+                      >
+                        <span class="row-seq-pill letter-pill">
+                          {{ String.fromCharCode(65 + oIdx) }}
+                        </span>
+                        <NInput
+                          :value="typeof opt === 'string' ? opt : (opt as any).label"
+                          size="small"
+                          placeholder="输入选项内容..."
+                          @update:value="(val) => updateOptionText(oIdx, val)"
+                        />
+                        <NButton
+                          quaternary
+                          size="tiny"
+                          type="error"
+                          :disabled="(currentQuestion.options || []).length <= 1"
+                          @click="removeOption(oIdx)"
+                        >
+                          <template #icon><Trash2 :size="13" /></template>
+                        </NButton>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 专属设置 3：问答填空题 (Text Input) -->
+                  <div v-else-if="currentQuestion.type === 'text_input'" class="inspector-section-card">
+                    <div class="section-card-header">
+                      <h4 class="section-card-title">开放问答设置</h4>
+                    </div>
+                    <div class="form-field">
+                      <label class="field-label">输入占位提示语 (Placeholder)</label>
+                      <NInput
+                        v-model:value="currentQuestion.placeholder"
+                        size="medium"
+                        placeholder="例如：请详细阐述您的看法与建议..."
+                        clearable
+                        @update:value="markDirty"
                       />
                     </div>
                   </div>
 
-                  <span class="rule-arrow">➔</span>
+                  <!-- 有向图逻辑跳转规则配置 (Jump Logic Rules) -->
+                  <div class="inspector-section-card">
+                    <div class="section-card-header">
+                      <div class="header-title-flex">
+                        <h4 class="section-card-title">逻辑跳转与分支流控 (Jump Rules)</h4>
+                        <NTag
+                          size="tiny"
+                          :type="getConditionalJumpRules().length > 0 ? 'warning' : 'default'"
+                          :bordered="false"
+                        >
+                          {{ getConditionalJumpRules().length > 0 ? `${getConditionalJumpRules().length} 条分支规则` : '默认顺序推进' }}
+                        </NTag>
+                      </div>
+                      <NButton
+                        v-if="currentQuestion.type === 'single_choice' || currentQuestion.type === 'multiple_choice'"
+                        size="tiny"
+                        type="primary"
+                        secondary
+                        @click="addJumpRule"
+                      >
+                        <template #icon><Plus :size="12" /></template>
+                        <span>添加跳转条件</span>
+                      </NButton>
+                    </div>
 
-                  <div class="rule-dest">
-                    <span class="clause-text">跳转至</span>
-                    <TsSelect
-                      v-model="rule.to"
-                      :options="jumpTargetOptions"
-                      highlight
-                      size="sm"
-                      style="min-width: 180px;"
-                      @change="markDirty"
-                    />
+                    <div v-if="getConditionalJumpRules().length > 0" class="jump-rules-container">
+                      <div
+                        v-for="(rule, rIdx) in getConditionalJumpRules()"
+                        :key="rIdx"
+                        class="jump-rule-card"
+                      >
+                        <div class="rule-logic-row">
+                          <span class="rule-label">当选择</span>
+                          <NSelect
+                            :value="rule.when ? rule.when[currentQuestion.id] : 0"
+                            :options="
+                              (currentQuestion.options || []).map((opt, idx) => ({
+                                label: `选项 ${String.fromCharCode(65 + idx)}: ${typeof opt === 'string' ? opt : (opt as any).label}`,
+                                value: idx,
+                              }))
+                            "
+                            size="small"
+                            style="min-width: 180px; flex: 1;"
+                            @update:value="(val) => updateRuleOptionChoice(rule, Number(val))"
+                          />
+                          <span class="rule-arrow">➔ 跳转至</span>
+                          <NSelect
+                            :value="rule.to"
+                            :options="jumpTargetOptions"
+                            size="small"
+                            style="min-width: 180px; flex: 1;"
+                            @update:value="(val) => updateRuleTarget(rule, String(val))"
+                          />
+                          <NButton
+                            quaternary
+                            size="tiny"
+                            type="error"
+                            @click="removeJumpRule(rule)"
+                          >
+                            <template #icon><Trash2 :size="13" /></template>
+                          </NButton>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-else class="jump-empty-hint">
+                      <span>未配置特殊条件，受访者作答后将自然顺延进入下一题。</span>
+                    </div>
                   </div>
-
-                  <TsButton
-                    variant="ghost"
-                    size="xs"
-                    class="btn-danger"
-                    title="删除此规则"
-                    @click="removeJumpRule(rule)"
-                  >
-                    <Trash2 style="width: 13px; height: 13px;" />
-                  </TsButton>
                 </div>
-              </div>
-            </TsCard>
-          </div>
-        </section>
-      </div>
-    </main>
+              </section>
 
-    <!-- 保存成功提示 Toast -->
-    <div v-if="saveSuccessToast" class="toast-box">
-      <Check style="width: 14px; height: 14px; color: #10b981;" />
-      <span>问卷改动已持久化保存至 SQLite 数据库</span>
-    </div>
-  </div>
+              <!-- 分屏模式右侧流程拓扑画布 -->
+              <aside v-if="viewMode === 'split'" class="split-canvas-sidebar">
+                <SurveyFlowCanvas
+                  :key="currentSurveyId"
+                  :questionnaire="questionnaire"
+                  @select-question="handleCanvasSelectQuestion"
+                />
+              </aside>
+            </div>
+          </main>
+
+          <!-- 批量添加选项模态窗 -->
+          <NModal
+            v-model:show="showBatchOptionModal"
+            preset="card"
+            title="批量导入选项"
+            style="width: 500px;"
+          >
+            <p style="font-size: 13px; color: #64748b; margin: 0 0 10px 0;">
+              每行输入一个选项内容，提交后将直接覆盖当前题目的选项列表：
+            </p>
+            <NInput
+              v-model:value="batchOptionText"
+              type="textarea"
+              :rows="8"
+              placeholder="例如：&#10;选项一&#10;选项二&#10;选项三"
+            />
+            <template #footer>
+              <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <NButton size="small" @click="showBatchOptionModal = false">取消</NButton>
+                <NButton size="small" type="primary" @click="handleApplyBatchOptions">
+                  应用覆盖
+                </NButton>
+              </div>
+            </template>
+          </NModal>
+        </div>
+      </NMessageProvider>
+    </NNotificationProvider>
+  </NConfigProvider>
 </template>
 
 <style scoped>
-.studio-root {
-  width: 100vw;
-  height: 100vh;
+.studio-app-root {
   display: flex;
   flex-direction: column;
-  background: #f8fafc;
+  height: 100vh;
+  width: 100vw;
+  background-color: #f8fafc;
   color: #0f172a;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* 顶栏 */
+/* 顶部工作台顶栏 */
 .studio-header {
-  height: 52px;
+  height: 56px;
   background: #ffffff;
   border-bottom: 1px solid rgba(15, 23, 42, 0.08);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  z-index: 20;
+  z-index: 30;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
-.brand-group {
+.brand-badge-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-.brand-name {
-  font-size: 0.92rem;
+.studio-badge {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: #ffffff;
+  font-size: 10px;
   font-weight: 800;
-  color: #0f172a;
-  letter-spacing: -0.01em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
 }
 
-.divider-v {
+.brand-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.header-v-divider {
   width: 1px;
-  height: 16px;
-  background: rgba(15, 23, 42, 0.1);
+  height: 20px;
+  background: rgba(15, 23, 42, 0.08);
+  margin: 0 4px;
 }
 
-.title-area {
+.title-inline-box {
   display: flex;
   align-items: center;
 }
@@ -968,10 +1230,10 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.15s;
 }
 
 .title-display:hover {
@@ -979,18 +1241,29 @@ onMounted(async () => {
 }
 
 .title-text {
-  font-size: 0.88rem;
+  font-size: 14px;
   font-weight: 600;
-  color: #1e293b;
+  color: #334155;
   max-width: 280px;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-icon {
+  color: #94a3b8;
 }
 
 .header-center {
   display: flex;
   align-items: center;
+}
+
+.radio-btn-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
 }
 
 .header-right {
@@ -999,355 +1272,340 @@ onMounted(async () => {
   gap: 10px;
 }
 
-/* 工作区 */
-.studio-body {
+/* 主工作台主体 */
+.studio-main-body {
   flex: 1;
   position: relative;
   overflow: hidden;
 }
 
-.state-stage {
-  height: 100%;
+.studio-state-stage {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  height: 100%;
   gap: 12px;
+}
+
+.state-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.state-hint {
+  font-size: 13px;
   color: #64748b;
-  font-size: 0.9rem;
+  margin: 0;
 }
 
-.spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid rgba(79, 70, 229, 0.2);
-  border-top-color: #4f46e5;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.flow-stage {
+.flow-fullscreen-stage {
   width: 100%;
   height: 100%;
 }
 
-/* 双栏模式 */
-.editor-stage {
-  display: grid;
-  grid-template-columns: 290px 1fr;
+/* 编排主容器 */
+.studio-workspace-container {
+  display: flex;
   height: 100%;
+  width: 100%;
+  overflow: hidden;
 }
 
-.outline-col {
+/* 左侧题目大纲 */
+.outline-sidebar {
+  width: 300px;
   background: #ffffff;
   border-right: 1px solid rgba(15, 23, 42, 0.08);
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex-shrink: 0;
 }
 
-.outline-head {
-  padding: 12px 14px;
+.outline-header {
+  padding: 14px 16px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.outline-title-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.outline-meta {
+.outline-heading {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.outline-search-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-.outline-label {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.outline-body {
+.outline-list-scroller {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.outline-node {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 8px;
-  border-radius: 6px;
+.outline-item-card {
+  padding: 10px 12px;
+  border-radius: 8px;
   border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.14s;
-}
-
-.outline-node:hover {
   background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.outline-node.selected {
+.outline-item-card:hover {
+  background: #f1f5f9;
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+.outline-item-card.is-active {
   background: #eef2ff;
-  border-color: rgba(79, 70, 229, 0.25);
+  border-color: #c7d2fe;
 }
 
-.node-left {
+.item-main-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  overflow: hidden;
 }
 
-.node-seq {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #475569;
+.item-index-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #4f46e5;
+  min-width: 24px;
 }
 
-.node-title {
-  font-size: 0.8rem;
-  color: #1e293b;
+.item-title-text {
+  font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
+  color: #334155;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 110px;
+  white-space: nowrap;
 }
 
-.node-actions {
+.item-jump-badge {
+  font-size: 11px;
+  color: #d97706;
+}
+
+.item-actions-row {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
 }
 
-.node-jump-flag {
-  font-size: 0.72rem;
-  color: #eab308;
-  margin-right: 2px;
+.outline-item-card:hover .item-actions-row,
+.outline-item-card.is-active .item-actions-row {
+  opacity: 1;
 }
 
-.action-mini-btn {
-  padding: 0 4px !important;
-  height: 22px !important;
-  color: #94a3b8 !important;
-}
-
-.action-mini-btn:hover {
-  color: #0f172a !important;
-}
-
-.btn-danger:hover {
-  color: #dc2626 !important;
-}
-
-/* 右侧属性面板 */
-.inspector-col {
-  height: 100%;
+/* 中间属性与逻辑主编辑区 */
+.inspector-workbench {
+  flex: 1;
+  background: #f8fafc;
   overflow-y: auto;
   padding: 20px 24px;
-  background: #f8fafc;
 }
 
-.inspector-wrapper {
-  max-width: 760px;
+.inspector-scroll-content {
+  max-width: 800px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.detail-header {
+.inspector-meta-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  padding: 14px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
-.detail-meta {
+.meta-left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.detail-q-tag {
-  font-size: 1.05rem;
+.q-seq-badge {
+  font-size: 15px;
   font-weight: 800;
   color: #0f172a;
 }
 
-.detail-controls {
+.meta-right {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.ctrl-group {
+.meta-control-item {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.82rem;
-  color: #475569;
 }
 
-.config-block {
+.control-label {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.inspector-section-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.section-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.header-title-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-actions-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.form-vertical-group {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.section-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.section-title {
-  font-size: 0.88rem;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.form-row {
+.form-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.row-label {
-  font-size: 0.8rem;
+.field-label {
+  font-size: 13px;
   font-weight: 600;
   color: #475569;
 }
 
-.options-title-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.options-container {
+.items-list-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.option-item {
+.edit-item-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.opt-alpha {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
+.row-seq-pill {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
   font-weight: 700;
-  color: #64748b;
-  width: 18px;
-  text-align: center;
-}
-
-.stmt-num-badge {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  background: #ecfdf5;
-  color: #059669;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 700;
   flex-shrink: 0;
 }
 
-.jump-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.scale-pill {
+  background: #ecfdf5;
+  color: #059669;
 }
 
-.jump-empty {
-  padding: 10px;
-  background: #f8fafc;
-  border-radius: 6px;
-  color: #64748b;
-  font-size: 0.78rem;
-  text-align: center;
+.letter-pill {
+  background: #eef2ff;
+  color: #4f46e5;
 }
 
-.rules-list {
+/* 跳转规则 */
+.jump-rules-container {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.rule-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
-  background: #ffffff;
-  border: 1px solid rgba(79, 70, 229, 0.15);
+.jump-rule-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
+  padding: 10px 12px;
 }
 
-.rule-clause {
+.rule-logic-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
-.when-wrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.clause-text {
-  font-size: 0.76rem;
+.rule-label,
+.rule-arrow {
+  font-size: 12px;
+  font-weight: 600;
   color: #64748b;
   white-space: nowrap;
 }
 
-.rule-arrow {
+.jump-empty-hint {
+  font-size: 13px;
   color: #94a3b8;
-  font-size: 0.82rem;
-  font-weight: 700;
+  padding: 8px 0;
 }
 
-.rule-dest {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toast-box {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  background: #ffffff;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #065f46;
-  padding: 8px 16px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  box-shadow: 0 8px 20px -4px rgba(0, 0, 0, 0.1);
-  z-index: 999;
+/* 分屏模式画布栏 */
+.split-canvas-sidebar {
+  width: 45%;
+  height: 100%;
+  border-left: 1px solid rgba(15, 23, 42, 0.08);
 }
 </style>

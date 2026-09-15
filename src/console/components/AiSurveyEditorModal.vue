@@ -326,8 +326,6 @@ async function handleDiscard() {
               <div class="bot-avatar"><Sparkles :size="16" /></div>
               <div class="bot-msg-body">
                 您好！我是 <strong>AI 问卷编辑助手</strong>。
-                <br />
-                您可以告诉我具体的修改需求（例如：“把第 3 题改为 5 级量表”、“删除第 2 题”、“增加一个满意度评分题”），我将通过局部精准替换完成修改。
               </div>
             </div>
 

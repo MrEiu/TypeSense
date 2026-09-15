@@ -30,9 +30,7 @@ const emit = defineEmits<{
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 16px;
-      margin-bottom: 20px;
-      border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+      width: 100%;
     "
   >
     <!-- 分类 Tabs -->

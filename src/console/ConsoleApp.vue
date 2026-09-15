@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, h } from 'vue';
+import { ref, onMounted, computed, watch, h } from 'vue';
 import {
   NConfigProvider,
   NNotificationProvider,
@@ -17,6 +17,7 @@ import {
   NTooltip,
   NSpin,
   NEmpty,
+  NPagination,
   type GlobalThemeOverrides,
   type MenuOption,
 } from 'naive-ui';
@@ -177,6 +178,20 @@ const filteredSurveys = computed(() => {
   }
 
   return list;
+});
+
+// 分页状态管理
+const currentPage = ref(1);
+const pageSize = ref(12);
+
+const paginatedSurveys = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value;
+  return filteredSurveys.value.slice(start, start + pageSize.value);
+});
+
+// 筛选或搜索条件变动时自动重置至第 1 页
+watch([searchQuery, currentFilterTab, sortBy, viewMode], () => {
+  currentPage.value = 1;
 });
 
 // 加载问卷列表
@@ -470,21 +485,23 @@ onMounted(() => {
           </NLayoutHeader>
 
           <!-- 主内容区域 Content -->
-          <NLayoutContent style="padding: 24px 28px 80px 28px;">
-            <div style="max-width: 1280px; margin: 0 auto;">
-              <!-- 1. 问卷资产管理视图 -->
-              <NCard
-                v-if="activeMenuKey === 'all_surveys'"
-                :bordered="true"
-                style="border-radius: 14px; background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);"
-              >
-                <!-- 筛选与排序工具栏组件 -->
+          <NLayoutContent style="flex: 1; min-height: 0; padding: 18px 24px 20px 24px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column;">
+            <!-- 1. 问卷资产管理视图 (自适应填满视口) -->
+            <div
+              v-if="activeMenuKey === 'all_surveys'"
+              class="console-workspace-container"
+            >
+              <!-- 顶部工具栏卡片 (常驻顶端) -->
+              <div class="console-filter-bar-card">
                 <SurveyFilterToolbar
                   v-model:filterTab="currentFilterTab"
                   v-model:sortBy="sortBy"
                   v-model:viewMode="viewMode"
                 />
+              </div>
 
+              <!-- 中间问卷列表区 (自适应撑满，超出自然滚动) -->
+              <div class="console-survey-scroll-area">
                 <!-- 加载中 -->
                 <div v-if="loading" style="padding: 80px 0; text-align: center;">
                   <NSpin size="large" />
@@ -495,7 +512,7 @@ onMounted(() => {
                   <!-- 双栏卡片网格组件 -->
                   <SurveyCardGrid
                     v-if="viewMode === 'grid'"
-                    :surveys="filteredSurveys"
+                    :surveys="paginatedSurveys"
                     @open-responses="openResponsesDrawer"
                     @open-detail="openDetailDrawer"
                     @open-ai-edit="openAiEditor"
@@ -508,7 +525,7 @@ onMounted(() => {
                   <!-- 数据表格列表组件 -->
                   <SurveyTableList
                     v-else
-                    :surveys="filteredSurveys"
+                    :surveys="paginatedSurveys"
                     @open-responses="openResponsesDrawer"
                     @open-detail="openDetailDrawer"
                     @open-ai-edit="openAiEditor"
@@ -518,7 +535,7 @@ onMounted(() => {
                 </div>
 
                 <!-- 空状态 -->
-                <div v-else style="padding: 60px 0; text-align: center;">
+                <div v-else class="empty-survey-box">
                   <NEmpty description="未找到符合条件的问卷">
                     <template #extra>
                       <NSpace justify="center">
@@ -529,10 +546,26 @@ onMounted(() => {
                     </template>
                   </NEmpty>
                 </div>
-              </NCard>
+              </div>
 
-              <!-- 2. 系统配置视图：大模型服务小卡片 -->
-              <div v-else-if="activeMenuKey === 'system_settings'" style="max-width: 860px;">
+              <!-- 底部分页控制器 (常驻自然吸底) -->
+              <div v-if="filteredSurveys.length > 0" class="console-pagination-footer-card">
+                <div class="footer-total-text">
+                  共 <strong style="color: #4f46e5;">{{ filteredSurveys.length }}</strong> 份问卷
+                </div>
+                <NPagination
+                  v-model:page="currentPage"
+                  v-model:page-size="pageSize"
+                  :item-count="filteredSurveys.length"
+                  :page-sizes="[6, 12, 24, 48]"
+                  show-size-picker
+                  show-quick-jumper
+                />
+              </div>
+            </div>
+
+            <!-- 2. 系统配置视图：大模型服务卡片 -->
+            <div v-else-if="activeMenuKey === 'system_settings'" style="max-width: 860px; margin: 0 auto; width: 100%;">
                 <div v-if="loadingLlmConfig && !llmConfig" style="padding: 80px 0; text-align: center;">
                   <NSpin size="large" />
                 </div>
@@ -688,7 +721,6 @@ onMounted(() => {
                   </template>
                 </NCard>
               </div>
-            </div>
           </NLayoutContent>
         </NLayout>
 
@@ -742,5 +774,58 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 保持纯净，全部依托 Naive UI 官方组件原生样式与 Design Tokens */
+.console-workspace-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  gap: 12px;
+  min-height: 0;
+}
+
+.console-filter-bar-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  padding: 10px 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  flex-shrink: 0;
+}
+
+.console-survey-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.empty-survey-box {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  padding: 80px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.console-pagination-footer-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  padding: 10px 18px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.footer-total-text {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
 </style>

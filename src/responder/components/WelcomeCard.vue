@@ -28,16 +28,6 @@ const emit = defineEmits<{
       {{ description }}
     </p>
 
-    <div class="welcome-meta-row">
-      <div class="meta-pill">
-        <CheckCircle2 :size="15" class="meta-icon" />
-        <span>共 <strong>{{ questionsCount }}</strong> 道评估指标</span>
-      </div>
-      <div class="meta-pill">
-        <span>⚡ 支持全键盘快速作答</span>
-      </div>
-    </div>
-
     <div class="welcome-action-row">
       <NButton
         type="primary"
@@ -50,10 +40,6 @@ const emit = defineEmits<{
           <ArrowRight :size="18" />
         </template>
       </NButton>
-
-      <span class="key-hint">
-        按 <kbd class="kbd-badge">Enter ↵</kbd>
-      </span>
     </div>
   </div>
 </template>
