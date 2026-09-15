@@ -108,7 +108,7 @@ async function fetchOpeningPrompt() {
     messages.value.push({
       id: `msg-${Date.now()}`,
       role: 'assistant',
-      content: `你好！这是一份关于「${props.survey.title}」的问卷。你可以随心聊聊相关经历或想法，聊到哪算哪，随时可以结束交谈~`,
+      content: `你好！这份问卷主要了解关于「${props.survey.title}」的情况。你可以先直接说说你的主要情况，想到什么说什么即可~`,
     });
   } finally {
     loadingOpening.value = false;
@@ -212,7 +212,7 @@ function handleClose() {
           </div>
           <div class="header-info">
             <h3 class="header-title">AI 对话速填</h3>
-            <span class="header-subtitle">随心交流，自动提炼问卷答案</span>
+            <span class="header-subtitle">自然交谈，高效采集问卷信息</span>
           </div>
         </div>
 
@@ -305,7 +305,7 @@ function handleClose() {
         <NInput
           v-model:value="userInput"
           type="text"
-          placeholder="随心聊聊相关经历或想法..."
+          placeholder="输入你的情况或直接回答..."
           size="large"
           :disabled="sending || loadingOpening"
           @keyup.enter="handleSend"
