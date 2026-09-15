@@ -543,8 +543,14 @@ app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
       if (doc) documentText = doc.extractedText;
     }
 
+    const trimmedPrompt = (prompt || '').trim();
+    if (!trimmedPrompt && !documentText) {
+      res.status(400).json({ error: '请提供问卷调研诉求或选择知识库文档' });
+      return;
+    }
+
     const survey = await AiGeneratorService.generateDirectSurvey({
-      prompt: (prompt || '').trim(),
+      prompt: trimmedPrompt,
       documentId,
       documentText,
       templateIds: activeTemplateIds,

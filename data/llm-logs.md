@@ -2371,3 +2371,324 @@ interface JumpRule {
 ```
 
 ---
+
+## [2026/9/15 12:22:11] 极速直出全卷 (generateDirectSurvey) (✅ 成功响应)
+
+- **模型**: `deepseek-v4-flash`
+- **耗时**: `19263 ms`
+- **附加元信息**: `{"targetCount":10,"enableJumpLogic":true}`
+
+### 📥 传给 LLM 的请求内容
+#### 💬 [SYSTEM]
+```text
+你是一位调研设计专家。请根据用户需求与核心参考资料文档生成结构化问卷 JSON。
+必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
+
+数据契约定义：
+interface QuestionnaireOutput {
+  title: string;
+  description: string;
+  questions: QuestionItem[];
+}
+
+type QuestionItem =
+  | SingleChoiceQuestion
+  | MultipleChoiceQuestion
+  | LikertScaleQuestion
+  | TextInputQuestion;
+
+// 单选题
+interface SingleChoiceQuestion {
+  id: string;          // 题号 "q1", "q2"...
+  type: "single_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 多选题
+interface MultipleChoiceQuestion {
+  id: string;
+  type: "multiple_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 量表题（矩阵评分）
+interface LikertScaleQuestion {
+  id: string;
+  type: "likert_scale";
+  title: string;
+  options: string[];   // 评分刻度（列）
+  statements: string[];// 评价条目（行）
+  jump?: JumpRule[];
+}
+
+// 填空题
+interface TextInputQuestion {
+  id: string;
+  type: "text_input";
+  title: string;
+  placeholder?: string;
+}
+
+// 跳转规则（仅在关键节点使用）
+interface JumpRule {
+  when?: Record<string, number | { has: number } | { "<=": number } | { ">=": number }>;
+  else?: boolean;
+  to: string;          // 目标题号 "qK"、正常完成 "end" 或淘汰退出 "exit"
+}
+
+规则与规范：
+- 核心资料约束（最高优先级）：用户提供了核心参考资料/文档。你必须严格以该参考资料的内容作为问卷设计的核心依据与知识来源，从中提取、归纳与转化题目、选项、评价维度和流转逻辑，严禁脱离参考资料凭空编造无关领域的问卷！若用户需求简短或仅为补充要求，以参考资料为主要出题事实依据。
+逻辑跳转规则：在有明确分流需要时（如特定选项筛选、不同受众分类）配置关键节点单向向前跳转（jump 字段）。
+- 题号必须严格从 q1 顺序递增到 q10。
+- 量表题（likert_scale）：为多维度矩阵评分题型，必须同时包含 options（横向评分刻度，如 ["非常不满意","不满意","一般","满意","非常满意"]）与 statements（纵向被评价的 3~6 个具体维度/子条目，如 ["功能完备度", "界面易用性", "系统稳定性"]），严禁遗漏 statements 字段！
+```
+
+#### 💬 [USER]
+```text
+调研需求：请严格根据下方核心参考资料的内容，提炼并转化为专业、结构化的调研问卷。
+
+目标题量：约 10 题
+
+【核心参考资料文档（出题必须严格以此为依据）】：
+医院常用问卷内容分类——第一部分：就诊前 / 分诊类
+
+用途说明：本部分整理医院在患者进入正式诊疗前常见的问卷内容，可作为问卷生成系统的基础内容模板与 Agent 示例数据。
+
+1. 患者基本信息登记
+
+姓名、年龄、性别、联系方式
+
+身份证 / 医保相关信息
+
+紧急联系人及联系方式
+
+就诊基本信息
+
+2. 就诊原因 / 主诉
+
+本次就诊的主要原因
+
+不适或症状的具体部位
+
+症状开始时间
+
+症状持续时间及变化情况
+
+症状严重程度
+
+是否曾经出现过类似症状
+
+3. 预检分诊问卷
+
+体温
+
+疼痛程度
+
+是否存在呼吸困难
+
+意识状态是否正常
+
+是否存在明显出血等紧急情况
+
+是否具有发热、咳嗽等感染相关症状
+
+是否存在其他需要优先处理的情况
+
+4. 既往史
+
+既往是否患有慢性疾病
+
+既往重大疾病史
+
+既往手术史
+
+既往住院史
+
+家族疾病史
+
+其他与本次就诊相关的既往病史
+
+5. 过敏史
+
+是否存在药物过敏
+
+过敏药物名称
+
+过敏反应表现
+
+是否存在食物过敏
+
+是否存在其他过敏
+
+过敏史的补充说明
+
+
+
+适合问卷 Agent 抽象的典型逻辑：
+
+是否有相关症状 → 有 → 进入症状详细采集；无 → 跳过相关问题
+
+是否有既往病史 → 有 → 展开疾病信息；无 → 继续下一部分
+
+是否存在药物过敏 → 有 → 采集药物名称及过敏反应；无 → 跳过
+
+是否存在紧急症状 → 是 → 进入优先分诊 / 风险提示；否 → 正常进入后续问卷
+
+参考逻辑模板：
+【参考逻辑流转模板：分层深入模板 (Progressive Drill-down)】（文件: 02-progressive-drilldown.json）
+设计意图说明：一级主分类，按选项分流至各自专属子题，最后汇合公共题
+模板完整 JSON 原文：
+```json
+{
+  "id": "progressive_drilldown",
+  "name": "分层深入模板 (Progressive Drill-down)",
+  "description": "一级主分类，按选项分流至各自专属子题，最后汇合公共题",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "q3" },
+        { "when": { "q1": 2 }, "to": "q4" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q5",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true
+    }
+  ]
+}
+```
+
+请直接输出符合契约的纯 JSON 问卷数据：
+```
+
+### 📤 LLM 产出内容
+#### 🤖 LLM 原始返回
+```json
+{
+  "title": "医院就诊前预检分诊与信息登记问卷",
+  "description": "本问卷基于医院就诊前/分诊类内容设计，用于采集患者基本信息、主诉、预检分诊、既往史及过敏史，并根据关键选项进行分层跳转。",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "您本次就诊是否存在呼吸困难、意识不清、明显出血、剧烈胸痛等紧急情况？",
+      "options": ["是", "否"],
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "q3" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "multiple_choice",
+      "title": "请选择您目前存在的紧急症状（可多选）",
+      "options": ["呼吸困难", "意识不清", "明显出血", "剧烈胸痛", "严重创伤", "其他紧急情况"],
+      "jump": [
+        { "to": "q4" }
+      ]
+    },
+    {
+      "id": "q3",
+      "type": "multiple_choice",
+      "title": "请选择您本次就诊的主要症状（可多选）",
+      "options": ["发热", "咳嗽", "咽痛", "腹痛", "头痛", "恶心呕吐", "皮疹", "其他"],
+      "jump": [
+        { "to": "q4" }
+      ]
+    },
+    {
+      "id": "q4",
+      "type": "likert_scale",
+      "title": "请根据您目前的症状，对以下方面进行严重程度评分",
+      "options": ["无", "轻微", "中等", "严重", "非常严重"],
+      "statements": ["疼痛/不适程度", "发热程度", "乏力程度", "对日常活动的影响", "睡眠影响"]
+    },
+    {
+      "id": "q5",
+      "type": "single_choice",
+      "title": "您的症状开始出现的时间是？",
+      "options": ["24小时内", "1-3天", "4-7天", "1-2周", "2周以上"]
+    },
+    {
+      "id": "q6",
+      "type": "single_choice",
+      "title": "您既往是否患有慢性疾病或重大疾病史？",
+      "options": ["是", "否"],
+      "jump": [
+        { "when": { "q6": 0 }, "to": "q7" },
+        { "when": { "q6": 1 }, "to": "q8" }
+      ]
+    },
+    {
+      "id": "q7",
+      "type": "multiple_choice",
+      "title": "请选择您既往患有的疾病或病史（可多选）",
+      "options": ["高血压", "糖尿病", "冠心病", "脑卒中", "慢性呼吸系统疾病", "肿瘤", "手术史", "住院史", "家族疾病史", "其他"],
+      "jump": [
+        { "to": "q8" }
+      ]
+    },
+    {
+      "id": "q8",
+      "type": "single_choice",
+      "title": "您是否存在药物过敏史？",
+      "options": ["是", "否"],
+      "jump": [
+        { "when": { "q8": 0 }, "to": "q9" },
+        { "when": { "q8": 1 }, "to": "q10" }
+      ]
+    },
+    {
+      "id": "q9",
+      "type": "text_input",
+      "title": "请填写过敏药物名称及过敏反应表现",
+      "placeholder": "例如：青霉素 - 皮疹、瘙痒；磺胺类 - 呼吸困难"
+    },
+    {
+      "id": "q10",
+      "type": "text_input",
+      "title": "请填写您的姓名、年龄、性别、联系方式及医保信息",
+      "placeholder": "姓名：张三；年龄：35；性别：男；电话：13800138000；医保类型：城镇职工医保"
+    }
+  ]
+}
+```
+
+---

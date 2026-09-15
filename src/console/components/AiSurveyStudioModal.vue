@@ -183,8 +183,14 @@ function resetStudioState() {
  * 启动后台 AI 智造（后台异步执行第二套单次直出，弹窗即刻关闭）
  */
 function handleStartGenerate() {
-  const prompt = userPrompt.value.trim() || '企业业务综合满意度与全流程体验调研';
+  const prompt = userPrompt.value.trim();
   const documentId = selectedDocId.value || undefined;
+
+  if (!prompt && !documentId) {
+    message.warning('请至少输入调研诉求或选用一份知识库文档');
+    return;
+  }
+
   const templateIds = selectedTemplateIds.value.length > 0 ? [...selectedTemplateIds.value] : undefined;
   const count = targetCount.value;
   const jump = enableJumpLogic.value;

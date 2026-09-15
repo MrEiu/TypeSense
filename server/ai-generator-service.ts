@@ -105,7 +105,11 @@ export class AiGeneratorService {
       ? `逻辑跳转规则：在有明确分流需要时（如特定选项筛选、不同受众分类）配置关键节点单向向前跳转（jump 字段）。`
       : `逻辑跳转规则：本次调研无需条件分支跳转逻辑，请采用线性自然推进流程（严禁在任何题目中生成 jump 字段）。`;
 
-    const systemPrompt = `你是一位调研设计专家。请根据用户需求生成结构化问卷 JSON。
+    const docInstruction = docText
+      ? `- 核心资料约束（最高优先级）：用户提供了核心参考资料/文档。你必须严格以该参考资料的内容作为问卷设计的核心依据与知识来源，从中提取、归纳与转化题目、选项、评价维度和流转逻辑，严禁脱离参考资料凭空编造无关领域的问卷！若用户需求简短或仅为补充要求，以参考资料为主要出题事实依据。`
+      : '';
+
+    const systemPrompt = `你是一位调研设计专家。请根据用户需求${docText ? '与核心参考资料文档' : ''}生成结构化问卷 JSON。
 必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
 
 数据契约定义：
@@ -165,7 +169,7 @@ interface JumpRule {
 }
 
 规则与规范：
-${logicInstruction}
+${docInstruction ? `${docInstruction}\n` : ''}${logicInstruction}
 - 题号必须严格从 q1 顺序递增到 q${targetCount}。
 - 量表题（likert_scale）：为多维度矩阵评分题型，必须同时包含 options（横向评分刻度，如 ["非常不满意","不满意","一般","满意","非常满意"]）与 statements（纵向被评价的 3~6 个具体维度/子条目，如 ["功能完备度", "界面易用性", "系统稳定性"]），严禁遗漏 statements 字段！`;
 
@@ -173,13 +177,26 @@ ${logicInstruction}
       ? TemplateService.formatTemplatesForPrompt(options.templateIds)
       : '';
 
-    const userPrompt = [
-      `调研需求：${prompt || '用户综合体验与满意度调研'}`,
-      `目标题量：约 ${targetCount} 题`,
-      docText ? `参考资料：\n${docText}` : '',
-      templateContext ? `参考逻辑模板：\n${templateContext}` : '',
-      '请直接输出符合契约的纯 JSON 问卷数据：',
-    ].filter(Boolean).join('\n\n');
+    const userPromptParts: string[] = [];
+    if (docText) {
+      if (prompt) {
+        userPromptParts.push(`调研需求与补充指示：${prompt}`);
+      } else {
+        userPromptParts.push(`调研需求：请严格根据下方核心参考资料的内容，提炼并转化为专业、结构化的调研问卷。`);
+      }
+      userPromptParts.push(`目标题量：约 ${targetCount} 题`);
+      userPromptParts.push(`【核心参考资料文档（出题必须严格以此为依据）】：\n${docText}`);
+    } else {
+      userPromptParts.push(`调研需求：${prompt || '用户综合体验与满意度调研'}`);
+      userPromptParts.push(`目标题量：约 ${targetCount} 题`);
+    }
+
+    if (templateContext) {
+      userPromptParts.push(`参考逻辑模板：\n${templateContext}`);
+    }
+    userPromptParts.push('请直接输出符合契约的纯 JSON 问卷数据：');
+
+    const userPrompt = userPromptParts.join('\n\n');
 
     try {
       const response = await LlmLogger.callAndLog(
@@ -403,17 +420,11 @@ ${logicInstruction}
     const relevantDoc = docText ? docText.slice(0, 25000) : '';
     const templateContext = TemplateService.formatTemplatesForPrompt(templateIds);
 
-    try {
-      const response = await LlmLogger.callAndLog(
-        'Stage 1 蓝图策划 (stage1PlanBlueprint)',
-        ai,
-        {
-          model: ai.model,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: `你是一位专业调研设计专家。请根据用户的调研诉求生成全景问卷蓝图，并将其自然划分为 2~10 个递进的调研题组块（blocks）。
+    const docConstraint = relevantDoc
+      ? `\n4. 核心资料约束：下方提供了核心参考资料/文档，蓝图策划必须严格以该资料的业务场景和内容结构为第一依据划分组块，严禁脱离文档捏造无关主题。`
+      : '';
+
+    const systemPromptContent = `你是一位专业调研设计专家。请根据用户的调研诉求${relevantDoc ? '与核心参考资料文档' : ''}生成全景问卷蓝图，并将其自然划分为 2~10 个递进的调研题组块（blocks）。
 你可以根据实际调研场景（如产品体验、满意度、学术调研、考卷诊断、活动反馈等）自由决定各组块的名称、考察维度与题数分配。
 
 必须直接输出纯 JSON，格式如下：
@@ -434,16 +445,44 @@ ${logicInstruction}
 契约约束：
 1. 所有 blocks 的 questionCount 之和必须精确等于 ${targetCount}。
 2. 每个 block 的 id 严格为 b1, b2, b3... 顺序递增。
-3. 题目作答结果即为变量，无需在蓝图中规划或预注册全局变量。`,
+3. 题目作答结果即为变量，无需在蓝图中规划或预注册全局变量。${docConstraint}`;
+
+    const userPromptParts: string[] = [];
+    if (relevantDoc) {
+      if (userPrompt) {
+        userPromptParts.push(`调研诉求与补充指示: ${userPrompt}`);
+      } else {
+        userPromptParts.push(`调研诉求: 请严格基于下方核心参考资料的内容结构与业务场景提炼并规划全景问卷蓝图`);
+      }
+      userPromptParts.push(`目标题数: ${targetCount}`);
+      if (templateContext) {
+        userPromptParts.push(`参考逻辑模板与拓扑范式:\n${templateContext}\n（请吸收参考上述模板中的结构与分流设计规划各组块）`);
+      }
+      userPromptParts.push(`【核心参考资料 (蓝图规划必须严格以此为依据)】:\n${relevantDoc}`);
+    } else {
+      userPromptParts.push(`调研诉求: ${userPrompt || '用户综合体验与满意度调研'}`);
+      userPromptParts.push(`目标题数: ${targetCount}`);
+      if (templateContext) {
+        userPromptParts.push(`参考逻辑模板与拓扑范式:\n${templateContext}\n（请吸收参考上述模板中的结构与分流设计规划各组块）`);
+      }
+      userPromptParts.push(`参考资料:\n（无额外参考文档，请基于专业调研方法论自主推演）`);
+    }
+
+    try {
+      const response = await LlmLogger.callAndLog(
+        'Stage 1 蓝图策划 (stage1PlanBlueprint)',
+        ai,
+        {
+          model: ai.model,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: systemPromptContent,
             },
             {
               role: 'user',
-              content: [
-                `调研诉求: ${userPrompt || '用户综合体验与满意度调研'}`,
-                `目标题数: ${targetCount}`,
-                templateContext ? `参考逻辑模板与拓扑范式:\n${templateContext}\n（请吸收参考上述模板中的结构与分流设计规划各组块）` : '',
-                `参考资料:\n${relevantDoc || '（无额外参考文档，请基于专业调研方法论自主推演）'}`,
-              ].filter(Boolean).join('\n'),
+              content: userPromptParts.join('\n\n'),
             },
           ],
         },
@@ -483,6 +522,8 @@ ${logicInstruction}
     const targetEndIndex = startIndex + count - 1;
     const templateContext = TemplateService.formatTemplatesForPrompt(params.templateIds);
 
+    const docContext = params.documentText ? params.documentText.slice(0, 20000) : '';
+
     const previousSummary = params.existingQuestions
       .map((q) => `[${q.id}] ${q.title} (${q.type})`)
       .join('; ');
@@ -505,9 +546,10 @@ ${logicInstruction}
       `当前出题组块: 【${params.block.name}】（${params.block.description}）`,
       `必须生成题目数量: ${count} 题（题号必须从 q${startIndex} 到 q${targetEndIndex}）`,
       previousSummary ? `前序已生成题目: ${previousSummary}` : '',
+      docContext ? `【核心参考资料（请紧密围绕本组块定位，优先从中提炼题目、选项与评价条目）】:\n${docContext}` : '',
       templateContext ? `参考逻辑模板:\n${templateContext}` : '',
       params.refinePrompt ? `用户补充要求: ${params.refinePrompt}` : '',
-    ].filter(Boolean).join('\n');
+    ].filter(Boolean).join('\n\n');
 
     try {
       const response = await LlmLogger.callAndLog(
@@ -519,7 +561,7 @@ ${logicInstruction}
           messages: [
             {
               role: 'system',
-              content: `你是一位调研设计专家。请根据指定调研组块的要求生成题目列表。
+              content: `你是一位调研设计专家。请根据指定调研组块的要求${docContext ? '与核心参考资料' : ''}生成题目列表。
 必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
 
 契约定义：
@@ -578,7 +620,7 @@ interface JumpRule {
 
 规范：
 - 题号必须严格从 q${startIndex} 到 q${targetEndIndex} 顺序递增。
-${jumpInstruction}`,
+${docContext ? '- 必须紧密结合当前组块的考察目标与核心参考资料内容，提炼设计具体的题目与选项。\n' : ''}${jumpInstruction}`,
             },
             {
               role: 'user',

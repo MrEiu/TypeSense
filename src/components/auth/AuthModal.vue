@@ -1,20 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import {
   NModal,
-  NCard,
-  NTabs,
-  NTabPane,
   NForm,
   NFormItem,
   NInput,
   NButton,
   NAlert,
-  NTag,
-  NSpace,
+  NCheckbox,
   useMessage,
 } from 'naive-ui';
-import { ShieldAlert, User, Lock, ArrowRight, UserPlus, LogIn } from 'lucide-vue-next';
+import { ShieldAlert, User, Lock, LogIn, UserPlus } from 'lucide-vue-next';
 import {
   AuthClientService,
   type UserAccount,
@@ -39,18 +35,37 @@ const emit = defineEmits<{
 
 const message = useMessage();
 
-// 表单状态
+// Active tab: 'login' | 'register'
 const activeTab = ref<'login' | 'register'>('login');
 const username = ref('');
 const password = ref('');
 const confirmPassword = ref('');
+const rememberMe = ref(true);
 const loading = ref(false);
 const errorMsg = ref<string | null>(null);
 
-// 当前已登录但非管理员的用户（如果有）
+const REMEMBER_USERNAME_KEY = 'typesense_remember_username';
+
+onMounted(() => {
+  const savedUsername = localStorage.getItem(REMEMBER_USERNAME_KEY);
+  if (savedUsername) {
+    username.value = savedUsername;
+    rememberMe.value = true;
+  }
+});
+
+// Currently logged-in user (if any)
 const currentUser = computed(() => AuthClientService.getCurrentUser());
 
-// 提交登录
+// Switch between login and register tabs
+function switchTab(tab: 'login' | 'register') {
+  activeTab.value = tab;
+  errorMsg.value = null;
+  password.value = '';
+  confirmPassword.value = '';
+}
+
+// Submit login
 async function handleLogin() {
   const u = username.value.trim();
   const p = password.value.trim();
@@ -66,15 +81,21 @@ async function handleLogin() {
   try {
     const user = await AuthClientService.login(u, p);
 
-    // 若当前为管理控制台模式，校验必须具备 admin 角色
+    if (rememberMe.value) {
+      localStorage.setItem(REMEMBER_USERNAME_KEY, u);
+    } else {
+      localStorage.removeItem(REMEMBER_USERNAME_KEY);
+    }
+
+    // Role check for admin mode
     if (props.mode === 'admin' && user.role !== 'admin') {
       AuthClientService.logout();
-      errorMsg.value = `账号「${user.username}」为普通成员，无管理控制台访问权限。请输入管理员账号。`;
+      errorMsg.value = `账号「${user.username}」为普通成员，无管理控制台访问权限。`;
       loading.value = false;
       return;
     }
 
-    message.success(props.mode === 'admin' ? `欢迎管理员 ${user.username} 进入控制台` : `欢迎回来，${user.username}`);
+    message.success(props.mode === 'admin' ? `欢迎管理员 ${user.username}` : `欢迎回来，${user.username}`);
     emit('success', user);
     emit('update:show', false);
     resetForm();
@@ -85,7 +106,7 @@ async function handleLogin() {
   }
 }
 
-// 提交注册 (普通成员)
+// Submit register (user role)
 async function handleRegister() {
   const u = username.value.trim();
   const p = password.value.trim();
@@ -106,6 +127,11 @@ async function handleRegister() {
 
   try {
     const user = await AuthClientService.register(u, p);
+
+    if (rememberMe.value) {
+      localStorage.setItem(REMEMBER_USERNAME_KEY, u);
+    }
+
     message.success(`注册成功，已自动登录为：${user.username}`);
     emit('success', user);
     emit('update:show', false);
@@ -118,7 +144,9 @@ async function handleRegister() {
 }
 
 function resetForm() {
-  username.value = '';
+  if (!rememberMe.value) {
+    username.value = '';
+  }
   password.value = '';
   confirmPassword.value = '';
   errorMsg.value = null;
@@ -132,49 +160,44 @@ function resetForm() {
     :closable="closable"
     preset="card"
     class="auth-modal"
-    style="width: 92vw; max-width: 460px; border-radius: 16px;"
+    style="width: 92vw; max-width: 420px; border-radius: 20px; box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.15);"
     @update:show="emit('update:show', $event)"
   >
-    <!-- 管理员模式专属展示 -->
-    <div v-if="mode === 'admin'" class="auth-admin-header">
-      <div class="auth-icon-wrap admin">
-        <ShieldAlert class="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+    <!-- Header with Logo and dynamic title -->
+    <div class="auth-header">
+      <div v-if="mode === 'admin'" class="auth-logo-badge admin">
+        <ShieldAlert class="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
       </div>
-      <h3 class="auth-title">控制台管理员准入鉴权</h3>
-      <p class="auth-subtitle">
-        访问问卷发布与管理控制台需要系统管理员权限，请输入管理员账号。
-      </p>
+      <div v-else class="auth-logo-badge">
+        <img src="/favicon.svg" alt="TypeSense" class="w-7 h-7" />
+      </div>
 
-      <div v-if="currentUser && currentUser.role !== 'admin'" class="auth-conflict-alert">
-        <NAlert type="warning" :bordered="false" class="mb-3">
-          当前已登录普通成员「{{ currentUser.username }}」，无管理权限。请以管理员身份登录。
-        </NAlert>
-      </div>
+      <h3 class="auth-title">
+        <template v-if="mode === 'admin'">管理员鉴权登录</template>
+        <template v-else-if="activeTab === 'login'">登录你的账户</template>
+        <template v-else>创建你的账户</template>
+      </h3>
     </div>
 
-    <!-- 普通受访者登录注册展示 -->
-    <div v-else class="auth-user-header">
-      <div class="auth-icon-wrap user">
-        <User class="w-7 h-7 text-emerald-600 dark:text-emerald-400" />
-      </div>
-      <h3 class="auth-title">登录以开始作答</h3>
-      <p class="auth-subtitle">
-        填写此问卷需要登录账号，以便准确记录与追踪您的问卷反馈。
-      </p>
+    <!-- Conflict warning for admin mode -->
+    <div v-if="mode === 'admin' && currentUser && currentUser.role !== 'admin'" class="mb-3">
+      <NAlert type="warning" :bordered="false">
+        当前普通成员「{{ currentUser.username }}」无管理权限，请使用管理员账号。
+      </NAlert>
     </div>
 
-    <!-- 错误警告条 -->
+    <!-- Error message alert -->
     <NAlert v-if="errorMsg" type="error" :bordered="false" class="auth-error-alert" closable @close="errorMsg = null">
       {{ errorMsg }}
     </NAlert>
 
-    <!-- 管理员表单 (仅单向登录) -->
+    <!-- Admin login form -->
     <div v-if="mode === 'admin'" class="auth-form-container">
       <NForm @submit.prevent="handleLogin">
         <NFormItem label="管理员账号">
           <NInput
             v-model:value="username"
-            placeholder="请输入管理员用户名 (如 admin)"
+            placeholder="请输入用户名"
             size="large"
             :disabled="loading"
             autocomplete="username"
@@ -190,7 +213,7 @@ function resetForm() {
             v-model:value="password"
             type="password"
             show-password-on="click"
-            placeholder="请输入管理员密码"
+            placeholder="请输入密码"
             size="large"
             :disabled="loading"
             autocomplete="current-password"
@@ -200,6 +223,10 @@ function resetForm() {
             </template>
           </NInput>
         </NFormItem>
+
+        <div class="auth-options-row">
+          <NCheckbox v-model:checked="rememberMe">记住账号</NCheckbox>
+        </div>
 
         <NButton
           type="primary"
@@ -212,26 +239,22 @@ function resetForm() {
           <template #icon>
             <LogIn class="w-4 h-4" />
           </template>
-          验证并进入控制台
+          登录
         </NButton>
       </NForm>
     </div>
 
-    <!-- 普通受访者表单 (支持登录 / 注册 Tabs) -->
+    <!-- Respondent user forms (Login / Register) -->
     <div v-else class="auth-form-container">
-      <NTabs v-model:value="activeTab" justify-content="space-evenly" type="segment" class="mb-4">
-        <NTabPane name="login" tab="账号登录" />
-        <NTabPane name="register" tab="注册新成员" />
-      </NTabs>
-
-      <!-- 登录标签页 -->
+      <!-- Login View -->
       <NForm v-if="activeTab === 'login'" @submit.prevent="handleLogin">
-        <NFormItem label="账号名称">
+        <NFormItem label="用户名">
           <NInput
             v-model:value="username"
-            placeholder="请输入您的用户名"
+            placeholder="请输入用户名"
             size="large"
             :disabled="loading"
+            autocomplete="username"
           >
             <template #prefix>
               <User class="w-4 h-4 text-slate-400 mr-1" />
@@ -247,12 +270,17 @@ function resetForm() {
             placeholder="请输入密码"
             size="large"
             :disabled="loading"
+            autocomplete="current-password"
           >
             <template #prefix>
               <Lock class="w-4 h-4 text-slate-400 mr-1" />
             </template>
           </NInput>
         </NFormItem>
+
+        <div class="auth-options-row">
+          <NCheckbox v-model:checked="rememberMe">记住账号</NCheckbox>
+        </div>
 
         <NButton
           type="primary"
@@ -265,18 +293,27 @@ function resetForm() {
           <template #icon>
             <LogIn class="w-4 h-4" />
           </template>
-          登录并继续答卷
+          登录
         </NButton>
+
+        <!-- Google-style clear switch entry to register -->
+        <div class="auth-switch-footer">
+          <span>还没有账户？</span>
+          <button type="button" class="auth-link-btn" @click="switchTab('register')">
+            立即注册
+          </button>
+        </div>
       </NForm>
 
-      <!-- 注册标签页 -->
+      <!-- Register View -->
       <NForm v-else @submit.prevent="handleRegister">
-        <NFormItem label="设置账号">
+        <NFormItem label="用户名">
           <NInput
             v-model:value="username"
-            placeholder="字母/数字/下划线 (2~32字符)"
+            placeholder="设置用户名"
             size="large"
             :disabled="loading"
+            autocomplete="username"
           >
             <template #prefix>
               <User class="w-4 h-4 text-slate-400 mr-1" />
@@ -284,14 +321,15 @@ function resetForm() {
           </NInput>
         </NFormItem>
 
-        <NFormItem label="设置密码">
+        <NFormItem label="密码">
           <NInput
             v-model:value="password"
             type="password"
             show-password-on="click"
-            placeholder="至少 4 位密码"
+            placeholder="设置密码 (至少 4 位)"
             size="large"
             :disabled="loading"
+            autocomplete="new-password"
           >
             <template #prefix>
               <Lock class="w-4 h-4 text-slate-400 mr-1" />
@@ -307,6 +345,7 @@ function resetForm() {
             placeholder="请再次输入密码"
             size="large"
             :disabled="loading"
+            autocomplete="new-password"
           >
             <template #prefix>
               <Lock class="w-4 h-4 text-slate-400 mr-1" />
@@ -325,61 +364,57 @@ function resetForm() {
           <template #icon>
             <UserPlus class="w-4 h-4" />
           </template>
-          注册并开始答题
+          注册
         </NButton>
+
+        <!-- Google-style clear switch entry to login -->
+        <div class="auth-switch-footer">
+          <span>已有账户？</span>
+          <button type="button" class="auth-link-btn" @click="switchTab('login')">
+            直接登录
+          </button>
+        </div>
       </NForm>
     </div>
   </NModal>
 </template>
 
 <style scoped>
-.auth-admin-header,
-.auth-user-header {
-  text-align: center;
-  margin-bottom: 20px;
+.auth-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 24px;
 }
 
-.auth-icon-wrap {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+.auth-logo-badge {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  background: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
   margin-bottom: 12px;
 }
 
-.auth-icon-wrap.admin {
-  background: rgba(79, 70, 229, 0.1);
-  border: 1px solid rgba(79, 70, 229, 0.2);
-}
-
-.auth-icon-wrap.user {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+.auth-logo-badge.admin {
+  background: rgba(79, 70, 229, 0.08);
+  border-color: rgba(79, 70, 229, 0.2);
 }
 
 .auth-title {
-  font-size: 1.25rem;
+  font-size: 1.35rem;
   font-weight: 700;
-  color: #1e293b;
-  margin: 0 0 6px 0;
-  letter-spacing: -0.01em;
+  color: #0f172a;
+  margin: 0;
+  letter-spacing: -0.02em;
 }
 
 :root.dark .auth-title {
   color: #f8fafc;
-}
-
-.auth-subtitle {
-  font-size: 0.875rem;
-  color: #64748b;
-  margin: 0;
-  line-height: 1.45;
-}
-
-:root.dark .auth-subtitle {
-  color: #94a3b8;
 }
 
 .auth-error-alert {
@@ -387,9 +422,60 @@ function resetForm() {
   border-radius: 8px;
 }
 
-.auth-submit-btn {
-  margin-top: 8px;
-  font-weight: 600;
+.auth-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  margin-top: -6px;
 }
 
+.auth-submit-btn {
+  margin-top: 4px;
+  font-weight: 600;
+  height: 42px;
+  border-radius: 10px;
+}
+
+.auth-switch-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  font-size: 0.9rem;
+  color: #64748b;
+  gap: 4px;
+}
+
+:root.dark .auth-switch-footer {
+  border-top-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+}
+
+.auth-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #4f46e5;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  outline: none;
+}
+
+.auth-link-btn:hover {
+  color: #4338ca;
+  text-decoration: underline;
+}
+
+:root.dark .auth-link-btn {
+  color: #818cf8;
+}
+
+:root.dark .auth-link-btn:hover {
+  color: #a5b4fc;
+}
 </style>
