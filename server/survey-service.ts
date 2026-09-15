@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db, SURVEYS_DIR } from './db';
 import { generateSurveyId, generateShortCode } from './id-generator';
+import { normalizeQuestionnaire, SchemaValidator } from '../src/schema';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -298,7 +299,7 @@ export class SurveyService {
       const title = data.title || existingParsed.title || '未命名问卷';
       const description = data.description !== undefined ? data.description : (existingParsed.description || '');
 
-      const mergedSchema = {
+      const mergedSchema = normalizeQuestionnaire({
         ...existingParsed,
         ...data.schema,
         id: row.id,
@@ -306,7 +307,12 @@ export class SurveyService {
         title,
         description,
         updatedAt: now,
-      };
+      });
+
+      const validation = SchemaValidator.validateQuestionnaire(mergedSchema);
+      if (!validation.isValid) {
+        console.warn(`[SurveyService] Questionnaire schema warnings for ${row.id}:`, validation.errors);
+      }
 
       // Write to data/surveys/<id>.json
       this.writeSurveyFile(row.id, mergedSchema);
@@ -338,7 +344,7 @@ export class SurveyService {
     const slug = data.slug && data.slug.trim() ? data.slug.trim() : surveyId;
     const now = new Date().toISOString();
 
-    const schemaToSave = {
+    const schemaToSave = normalizeQuestionnaire({
       ...data.schema,
       id: surveyId,
       slug,
@@ -346,7 +352,12 @@ export class SurveyService {
       description: data.description || '',
       createdAt: now,
       updatedAt: now,
-    };
+    });
+
+    const validation = SchemaValidator.validateQuestionnaire(schemaToSave);
+    if (!validation.isValid) {
+      console.warn(`[SurveyService] Created questionnaire schema warnings for ${surveyId}:`, validation.errors);
+    }
 
     // 1. Write file to data/surveys/<id>.json
     this.writeSurveyFile(surveyId, schemaToSave);

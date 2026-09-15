@@ -5,9 +5,10 @@
  * Exposes direct lean survey generation and concurrent agentic pipelines.
  */
 
-import type {
-  QuestionnaireModel,
-  QuestionItemModel,
+import {
+  type QuestionnaireModel,
+  type QuestionItemModel,
+  normalizeQuestionnaire,
 } from '../../../src/schema/questionnaire-schema-types';
 import { LlmClientFactory } from '../shared/llm-client';
 import { StructuredOutputParser } from '../shared/structured-output';
@@ -30,6 +31,40 @@ export interface GenerationOptions {
   targetCount: number;
   enableJumpLogic?: boolean;
 }
+
+export interface SurveyBlockDefinition {
+  id: string;
+  name: string;
+  description: string;
+  questionCount: number;
+  purpose?: 'screening' | 'branching' | 'scoring' | 'feedback' | 'general';
+}
+
+export interface SurveyBlueprint {
+  title: string;
+  description: string;
+  targetAudience: string;
+  dimensions: SurveyBlockDefinition[];
+  blocks: SurveyBlockDefinition[];
+  variables?: Array<{
+    name: string;
+    description: string;
+    formulaDraft?: string;
+  }>;
+  criticalJumpPoints?: Array<{
+    questionIndex: number;
+    purpose: 'screening' | 'branching' | 'scoring';
+    description: string;
+  }>;
+}
+
+export type PipelineEvent =
+  | { type: 'stage_start'; stage: 'planning' | 'generating'; message: string }
+  | { type: 'thought_chunk'; delta: string }
+  | { type: 'blueprint_ready'; blueprint: SurveyBlueprint }
+  | { type: 'question_drafted'; question: QuestionItemModel; index: number; total: number }
+  | { type: 'completed'; survey: QuestionnaireModel; sessionId: string }
+  | { type: 'error'; error: string };
 
 export class SurveyGeneratorService {
   /**
@@ -89,12 +124,12 @@ export class SurveyGeneratorService {
       SurveyGraphValidator.fastAcyclicGuard(sanitizedQuestions)
     );
 
-    return {
+    return normalizeQuestionnaire({
       id: '',
       title: String(parsed.title || prompt || '调研问卷').trim(),
       description: String(parsed.description || '基于 AI 极速直出全卷生成。').trim(),
       questions: safeQuestions,
-    };
+    });
   }
 
   /**

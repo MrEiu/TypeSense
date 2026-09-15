@@ -7,10 +7,8 @@
 import { Router, Request, Response } from 'express';
 import { SurveyService } from '../survey-service';
 import { DocumentService } from '../document-service';
-import { AiGeneratorService } from '../ai-generator-service';
-import { ConcurrentPipelineService } from '../concurrent-pipeline-service';
 import { ConfigService } from '../config-service';
-import { AiChatFillerService } from '../ai-chat-filler-service';
+import { SurveyGeneratorService, SurveyFillerService } from '../ai';
 import type { QuestionnaireModel, QuestionItemModel } from '../../src/schema/questionnaire-schema-types';
 
 export const aiRouter = Router();
@@ -30,7 +28,7 @@ aiRouter.post('/api/surveys/:id/ai-chat-fill', async (req: Request, res: Respons
     const survey = surveyRaw as unknown as QuestionnaireModel;
     const { currentAnswers = {}, messages = [] } = req.body || {};
 
-    const result = await AiChatFillerService.chatAndExtract({
+    const result = await SurveyFillerService.chatAndExtract({
       survey,
       currentAnswers,
       messages,
@@ -118,7 +116,7 @@ aiRouter.post('/api/ai/generate-stream', async (req: Request, res: Response) => 
       return;
     }
 
-    const generatedSurvey = await ConcurrentPipelineService.executeConcurrentPipeline(
+    const generatedSurvey = await SurveyGeneratorService.executeConcurrentPipeline(
       {
         prompt: userPrompt,
         targetCount: Number(targetCount) || 8,
@@ -186,7 +184,7 @@ aiRouter.post('/api/ai/generate-direct', async (req: Request, res: Response) => 
       return;
     }
 
-    const survey = await AiGeneratorService.generateDirectSurvey({
+    const survey = await SurveyGeneratorService.generateDirectSurvey({
       prompt: trimmedPrompt,
       documentId,
       documentText,
@@ -236,7 +234,7 @@ aiRouter.post('/api/ai/plan-blueprint', async (req: Request, res: Response) => {
       if (doc) documentText = doc.extractedText;
     }
 
-    const taskPlan = await ConcurrentPipelineService.planTasks({
+    const taskPlan = await SurveyGeneratorService.planTasks({
       prompt: (prompt || '').trim(),
       targetCount: Number(targetCount) || 8,
       documentText,
@@ -273,7 +271,7 @@ aiRouter.post('/api/ai/generate-chunk', async (req: Request, res: Response) => {
     const count = Number(block?.questionCount || block?.count) || 3;
     const taskPrompt = String(block?.prompt || block?.description || refinePrompt || '负责该维度调研题目生成');
 
-    const questions = await ConcurrentPipelineService.generateWorkerChunk({
+    const questions = await SurveyGeneratorService.generateWorkerChunk({
       blockId,
       count,
       prompt: taskPrompt,
@@ -317,10 +315,10 @@ aiRouter.post('/api/ai/finalize-survey', async (req: Request, res: Response) => 
         if (!blockMap.has(blockId)) blockMap.set(blockId, []);
         blockMap.get(blockId)!.push(q);
       });
-      safeQuestions = ConcurrentPipelineService.assembleQuestions(dummyTasks, blockMap);
+      safeQuestions = SurveyGeneratorService.assembleQuestions(dummyTasks, blockMap);
     } else {
-      safeQuestions = AiGeneratorService.cleanUnusedVariables(
-        AiGeneratorService.fastAcyclicGuard(questions)
+      safeQuestions = SurveyGeneratorService.cleanUnusedVariables(
+        SurveyGeneratorService.fastAcyclicGuard(questions)
       );
     }
 
