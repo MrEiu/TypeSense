@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import type OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 export const LOGS_DIR = path.resolve(__dirname, '../logs/llm');
 export const LOGS_FILE_PATH = path.join(LOGS_DIR, 'llm-logs.md');
 
