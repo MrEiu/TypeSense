@@ -26,18 +26,33 @@ aiRouter.post('/api/surveys/:id/ai-chat-fill', async (req: Request, res: Respons
     }
 
     const survey = surveyRaw as unknown as QuestionnaireModel;
-    const { currentAnswers = {}, messages = [] } = req.body || {};
+    const { currentAnswers = {}, messages = [], strategy, sessionMeta } = req.body || {};
 
     const result = await SurveyFillerService.chatAndExtract({
       survey,
       currentAnswers,
       messages,
+      strategy,
+      sessionMeta,
     });
 
     res.json(result);
   } catch (err: any) {
     console.error('[API] ai-chat-fill error:', err);
     res.status(500).json({ success: false, error: err.message || 'AI 对话服务处理异常' });
+  }
+});
+
+/**
+ * Get available AI speed-filler strategies
+ */
+aiRouter.get('/api/ai/filler-strategies', (_req: Request, res: Response) => {
+  try {
+    const strategies = SurveyFillerService.getStrategies();
+    res.json({ success: true, strategies });
+  } catch (err: any) {
+    console.error('[API] getStrategies error:', err);
+    res.status(500).json({ success: false, error: err?.message || '获取策略列表失败' });
   }
 });
 

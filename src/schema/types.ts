@@ -74,6 +74,8 @@ export interface QuestionnaireModel {
   jumps?: JumpRule[];
   /** Global or derived variable definitions */
   variables?: Record<string, string | number>;
+  /** Default AI speed-filling strategy */
+  aiStrategy?: 'natural' | 'deep' | 'batch' | 'evidence' | 'adaptive';
   createdAt?: string;
   updatedAt?: string;
 }

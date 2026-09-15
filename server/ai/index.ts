@@ -20,6 +20,10 @@ export * from './generator/validator';
 
 // Filler subsystem
 export * from './filler/filler-service';
+export * from './filler/core/types';
+export * from './filler/core/registry';
+export * from './filler/core/filler-core';
+export * from './filler/plugins';
 export * from './filler/decision-engine';
 export * from './filler/prompt-builder';
 

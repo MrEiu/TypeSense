@@ -20,6 +20,7 @@ interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  type?: 'ask' | 'fill' | 'confirm' | 'finish';
   updates?: ExtractedAnswerUpdate[];
 }
 
@@ -42,6 +43,21 @@ const loadingOpening = ref(false);
 const errorMsg = ref<string | null>(null);
 const chatScrollRef = ref<HTMLElement | null>(null);
 
+// Strategy mapping & state
+const activeStrategyId = ref<string>(props.survey.aiStrategy || 'natural');
+
+const STRATEGY_INFO_MAP: Record<string, { label: string; desc: string }> = {
+  natural: { label: '🍃 自然引导', desc: '围绕调研目标自然交流，获知关键点后收束' },
+  deep: { label: '🔍 深度追问', desc: '溯源因果链路与深层动因，设有限度熔断' },
+  batch: { label: '⚡ 高效聚合', desc: '题目聚类打包，一揽子多指标抽取' },
+  evidence: { label: '🛡️ 证据优先', desc: '严格事实依据驱动，三阶置信度门限' },
+  adaptive: { label: '🧭 探索式适配', desc: '智能策略路由，自适应受访表达风格' },
+};
+
+const currentStrategyInfo = computed(() => {
+  return STRATEGY_INFO_MAP[activeStrategyId.value] || STRATEGY_INFO_MAP.natural;
+});
+
 // In-session accumulated answers
 const sessionAnswers = ref<QuestionAnswerMap>({});
 const newlyRecordedMap = ref<Record<string, ExtractedAnswerUpdate>>({});
@@ -54,10 +70,11 @@ watch(
   () => props.show,
   (val) => {
     if (val) {
-      // Initialize state with current survey answers
+      // Initialize state with current survey answers and strategy
       sessionAnswers.value = { ...props.initialAnswers };
       newlyRecordedMap.value = {};
       errorMsg.value = null;
+      activeStrategyId.value = props.survey.aiStrategy || 'natural';
 
       // If first time open, fetch opening welcome prompt
       if (messages.value.length === 0) {
@@ -89,6 +106,7 @@ async function fetchOpeningPrompt() {
       body: JSON.stringify({
         currentAnswers: sessionAnswers.value,
         messages: [],
+        strategy: activeStrategyId.value,
       }),
     });
 
@@ -97,10 +115,15 @@ async function fetchOpeningPrompt() {
       throw new Error(data.error || '获取 AI 引导语失败');
     }
 
+    if (data.metadata?.strategyId) {
+      activeStrategyId.value = data.metadata.strategyId;
+    }
+
     messages.value.push({
       id: `msg-${Date.now()}`,
       role: 'assistant',
       content: data.reply,
+      type: data.type,
     });
     scrollToBottom();
   } catch (err: any) {
@@ -147,12 +170,17 @@ async function handleSend() {
       body: JSON.stringify({
         currentAnswers: sessionAnswers.value,
         messages: historyPayload,
+        strategy: activeStrategyId.value,
       }),
     });
 
     const data = await resp.json();
     if (!resp.ok || !data.success) {
       throw new Error(data.error || 'AI 回复异常');
+    }
+
+    if (data.metadata?.strategyId) {
+      activeStrategyId.value = data.metadata.strategyId;
     }
 
     const updates: ExtractedAnswerUpdate[] = Array.isArray(data.updates) ? data.updates : [];
@@ -172,6 +200,7 @@ async function handleSend() {
       id: `msg-a-${Date.now()}`,
       role: 'assistant',
       content: data.reply || '已为你记录。请继续聊聊，或随时点击右上角完成。',
+      type: data.type,
       updates: updates.length > 0 ? updates : undefined,
     });
     scrollToBottom();
@@ -179,6 +208,16 @@ async function handleSend() {
     errorMsg.value = err.message || '网络通讯异常，请重试';
   } finally {
     sending.value = false;
+  }
+}
+
+function handleQuickConfirm(confirmed: boolean) {
+  if (sending.value) return;
+  if (confirmed) {
+    userInput.value = '确认记录正确';
+    handleSend();
+  } else {
+    userInput.value = '需要更正：';
   }
 }
 
@@ -229,8 +268,13 @@ function handleModalVisibilityChange(val: boolean) {
             <Sparkles class="w-4 h-4 text-indigo-600" />
           </div>
           <div class="header-info">
-            <h3 class="header-title">AI 对话速填</h3>
-            <span class="header-subtitle">自然交谈，高效采集问卷信息</span>
+            <div class="header-title-row">
+              <h3 class="header-title">AI 对话速填</h3>
+              <span class="strategy-badge" :title="currentStrategyInfo.desc">
+                {{ currentStrategyInfo.label }}
+              </span>
+            </div>
+            <span class="header-subtitle">{{ currentStrategyInfo.desc }}</span>
           </div>
         </div>
 
@@ -286,6 +330,12 @@ function handleModalVisibilityChange(val: boolean) {
         <div class="message-bubble-wrap">
           <div class="message-bubble">
             {{ msg.content }}
+          </div>
+
+          <!-- Quick confirmation bar if confirm type -->
+          <div v-if="msg.type === 'confirm'" class="confirm-action-bar">
+            <button class="confirm-act-btn primary" @click="handleQuickConfirm(true)">确认无误</button>
+            <button class="confirm-act-btn secondary" @click="handleQuickConfirm(false)">补充更正</button>
           </div>
 
           <!-- Inline extraction feedback badges -->
@@ -374,6 +424,12 @@ function handleModalVisibilityChange(val: boolean) {
   flex-shrink: 0;
 }
 
+.header-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .header-title {
   font-size: 1.05rem;
   font-weight: 700;
@@ -384,6 +440,22 @@ function handleModalVisibilityChange(val: boolean) {
 
 :root.dark .header-title {
   color: #f8fafc;
+}
+
+.strategy-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  cursor: default;
+}
+
+:root.dark .strategy-badge {
+  background: rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
 }
 
 .header-subtitle {
@@ -532,6 +604,44 @@ function handleModalVisibilityChange(val: boolean) {
   background: #4f46e5;
   color: #ffffff;
   border-top-right-radius: 4px;
+}
+
+.confirm-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.confirm-act-btn {
+  font-size: 0.76rem;
+  padding: 3px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.confirm-act-btn.primary {
+  background: #4f46e5;
+  color: #ffffff;
+  border-color: #4f46e5;
+}
+
+.confirm-act-btn.primary:hover {
+  background: #4338ca;
+}
+
+.confirm-act-btn.secondary {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+
+:root.dark .confirm-act-btn.secondary {
+  background: #1e293b;
+  color: #94a3b8;
+  border-color: #334155;
 }
 
 .extracted-tags-wrap {

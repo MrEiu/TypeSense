@@ -2,118 +2,91 @@
  * server/ai/filler/filler-service.ts
  *
  * Facade service for AI conversational questionnaire auto-filler.
+ * Delegates lifecycle and execution to the thin FillerCore and strategy plugins.
  */
 
-import OpenAI from 'openai';
 import {
   type QuestionnaireModel,
   type QuestionAnswerMap,
 } from '../../../src/schema/questionnaire-schema-types';
-import { LlmClientFactory } from '../shared/llm-client';
-import { LlmLogger } from '../../llm-logger';
-import { FillerPromptBuilder } from './prompt-builder';
-import {
-  FillerDecisionEngine,
+import './plugins'; // Ensure all strategy plugins are registered
+import { FillerCore } from './core/filler-core';
+import { StrategyPluginRegistry } from './core/registry';
+import type {
   ExtractedAnswerUpdate,
-} from './decision-engine';
+  StrategyDecisionResult,
+} from './core/types';
+
+export { ExtractedAnswerUpdate };
 
 export interface ChatFillerRequest {
   survey: QuestionnaireModel;
   currentAnswers: QuestionAnswerMap;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  strategy?: string;
+  sessionMeta?: Record<string, any>;
 }
 
 export interface ChatFillerResponse {
   success: boolean;
+  type?: 'ask' | 'fill' | 'confirm' | 'finish';
   reply: string;
   updates: ExtractedAnswerUpdate[];
   should_continue?: boolean;
+  metadata?: Record<string, any>;
 }
 
 export class SurveyFillerService {
   /**
-   * Main entrypoint: Chat and extract answers
+   * Main entrypoint: Chat and extract answers using the requested or survey strategy
    */
   public static async chatAndExtract(req: ChatFillerRequest): Promise<ChatFillerResponse> {
-    const { survey, currentAnswers = {}, messages = [] } = req;
-    const ai = LlmClientFactory.getClient(120000);
+    const { survey, currentAnswers = {}, messages = [], strategy, sessionMeta } = req;
+    const strategyId = strategy || (survey as any).aiStrategy;
 
-    // 1. Cold start opening prompt (when conversation has not started yet)
-    if (messages.length === 0) {
-      return this.generateOpeningPrompt(ai, survey);
-    }
-
-    // 2. Build question schema summary for LLM context
-    const questionsContext = FillerPromptBuilder.buildCompactQuestionsContext(
-      survey.questions,
-      currentAnswers
-    );
-    const systemPrompt = FillerPromptBuilder.buildSystemPrompt(questionsContext);
-
-    // 3. Format message history (limit to last 10 messages for token economy)
-    const recentMessages = messages.slice(-10).map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
-
-    // 4. Two-stage decision and reply generation
-    const result = await FillerDecisionEngine.executeTwoStageChat({
-      ai,
-      surveyId: survey.id,
-      questions: survey.questions,
-      systemPrompt,
-      recentMessages,
+    const decision: StrategyDecisionResult = await FillerCore.execute({
+      survey,
+      currentAnswers,
+      messages,
+      strategyId,
+      sessionMeta,
     });
 
     return {
       success: true,
-      reply: result.reply,
-      updates: result.updates,
-      should_continue: result.shouldContinue,
+      type: decision.type,
+      reply: decision.reply,
+      updates: decision.updates,
+      should_continue: decision.shouldContinue,
+      metadata: decision.metadata,
     };
   }
 
   /**
-   * Cold start opening generator
+   * Generates opening welcome using the requested or survey strategy
    */
   public static async generateOpeningPrompt(
-    ai: { client: OpenAI; model: string },
-    survey: QuestionnaireModel
+    _ai: any,
+    survey: QuestionnaireModel,
+    strategyId?: string
   ): Promise<ChatFillerResponse> {
-    const previewQuestions = (survey.questions || [])
-      .slice(0, 4)
-      .map((q) => q.title)
-      .join('、');
-
-    const prompt = FillerPromptBuilder.buildOpeningPrompt(
-      survey.title,
-      survey.description || '',
-      previewQuestions
-    );
-
-    const createParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-      model: ai.model,
-      messages: [{ role: 'system', content: prompt }],
-      temperature: 0.5,
-      max_tokens: 200,
-    };
-
-    const completion = await LlmLogger.callAndLog(
-      'ai-chat-filler-opening',
-      ai,
-      createParams,
-      { surveyId: survey.id }
-    );
-
-    const reply =
-      completion.choices?.[0]?.message?.content?.trim() ||
-      `你好！这份问卷主要了解关于「${survey.title}」的情况。你可以先简单说说你的主要情况，我会帮你把涉及的内容先记录好，剩余题目也可以稍后在问卷中查看~`;
+    const effectiveStrategy = strategyId || (survey as any).aiStrategy;
+    const decision = await FillerCore.generateOpening(survey, effectiveStrategy);
 
     return {
       success: true,
-      reply,
-      updates: [],
-      should_continue: true,
+      type: decision.type,
+      reply: decision.reply,
+      updates: decision.updates,
+      should_continue: decision.shouldContinue,
+      metadata: decision.metadata,
     };
+  }
+
+  /**
+   * Lists all available strategy manifests
+   */
+  public static getStrategies() {
+    return StrategyPluginRegistry.listManifests();
   }
 }
