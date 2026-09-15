@@ -73,6 +73,7 @@ export class QuestionnaireLoaderService {
         title: q.title,
         description: q.description,
         options: q.options,
+        statements: q.statements,
         placeholder: q.placeholder,
         required: q.required,
         set: q.set && typeof q.set === 'object' ? (q.set as Record<string, string | number>) : undefined,
@@ -82,6 +83,7 @@ export class QuestionnaireLoaderService {
 
     return {
       id: data.id,
+      slug: data.slug,
       title: data.title,
       description: data.description || '',
       questions: validatedQuestions,

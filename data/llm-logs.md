@@ -1780,3 +1780,236 @@ interface JumpRule {
 ```
 
 ---
+
+## [2026/9/15 09:22:42] 极速直出全卷 (generateDirectSurvey) (✅ 成功响应)
+
+- **模型**: `deepseek-v4-flash`
+- **耗时**: `26904 ms`
+- **附加元信息**: `{"targetCount":20,"enableJumpLogic":true}`
+
+### 📥 传给 LLM 的请求内容
+#### 💬 [SYSTEM]
+```text
+你是一位调研设计专家。请根据用户需求生成结构化问卷 JSON。
+必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
+
+数据契约定义：
+interface QuestionnaireOutput {
+  title: string;
+  description: string;
+  questions: QuestionItem[];
+}
+
+type QuestionItem =
+  | SingleChoiceQuestion
+  | MultipleChoiceQuestion
+  | LikertScaleQuestion
+  | TextInputQuestion;
+
+// 单选题
+interface SingleChoiceQuestion {
+  id: string;          // 题号 "q1", "q2"...
+  type: "single_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 多选题
+interface MultipleChoiceQuestion {
+  id: string;
+  type: "multiple_choice";
+  title: string;
+  options: string[];   // 选项文本
+  jump?: JumpRule[];
+}
+
+// 量表题（矩阵评分）
+interface LikertScaleQuestion {
+  id: string;
+  type: "likert_scale";
+  title: string;
+  options: string[];   // 评分刻度（列）
+  statements: string[];// 评价条目（行）
+  jump?: JumpRule[];
+}
+
+// 填空题
+interface TextInputQuestion {
+  id: string;
+  type: "text_input";
+  title: string;
+  placeholder?: string;
+}
+
+// 跳转规则（仅在关键节点使用）
+interface JumpRule {
+  when?: Record<string, number | { has: number } | { "<=": number } | { ">=": number }>;
+  else?: boolean;
+  to: string;          // 目标题号 "qK"、正常完成 "end" 或淘汰退出 "exit"
+}
+
+规则与规范：
+逻辑跳转规则：在有明确分流需要时（如特定选项筛选、不同受众分类）配置关键节点单向向前跳转（jump 字段）。
+- 题号必须严格从 q1 顺序递增到 q20。
+- 量表题（likert_scale）：为多维度矩阵评分题型，必须同时包含 options（横向评分刻度，如 ["非常不满意","不满意","一般","满意","非常满意"]）与 statements（纵向被评价的 3~6 个具体维度/子条目，如 ["功能完备度", "界面易用性", "系统稳定性"]），严禁遗漏 statements 字段！
+```
+
+#### 💬 [USER]
+```text
+调研需求：企业业务综合满意度与全流程体验调研
+
+目标题量：约 20 题
+
+参考资料：
+医院常用问卷内容分类——第一部分：就诊前 / 分诊类
+
+用途说明：本部分整理医院在患者进入正式诊疗前常见的问卷内容，可作为问卷生成系统的基础内容模板与 Agent 示例数据。
+
+1. 患者基本信息登记
+
+姓名、年龄、性别、联系方式
+
+身份证 / 医保相关信息
+
+紧急联系人及联系方式
+
+就诊基本信息
+
+2. 就诊原因 / 主诉
+
+本次就诊的主要原因
+
+不适或症状的具体部位
+
+症状开始时间
+
+症状持续时间及变化情况
+
+症状严重程度
+
+是否曾经出现过类似症状
+
+3. 预检分诊问卷
+
+体温
+
+疼痛程度
+
+是否存在呼吸困难
+
+意识状态是否正常
+
+是否存在明显出血等紧急情况
+
+是否具有发热、咳嗽等感染相关症状
+
+是否存在其他需要优先处理的情况
+
+4. 既往史
+
+既往是否患有慢性疾病
+
+既往重大疾病史
+
+既往手术史
+
+既往住院史
+
+家族疾病史
+
+其他与本次就诊相关的既往病史
+
+5. 过敏史
+
+是否存在药物过敏
+
+过敏药物名称
+
+过敏反应表现
+
+是否存在食物过敏
+
+是否存在其他过敏
+
+过敏史的补充说明
+
+
+
+适合问卷 Agent 抽象的典型逻辑：
+
+是否有相关症状 → 有 → 进入症状详细采集；无 → 跳过相关问题
+
+是否有既往病史 → 有 → 展开疾病信息；无 → 继续下一部分
+
+是否存在药物过敏 → 有 → 采集药物名称及过敏反应；无 → 跳过
+
+是否存在紧急症状 → 是 → 进入优先分诊 / 风险提示；否 → 正常进入后续问卷
+
+参考逻辑模板：
+【参考逻辑流转模板：分层深入模板 (Progressive Drill-down)】（文件: 02-progressive-drilldown.json）
+设计意图说明：一级主分类，按选项分流至各自专属子题，最后汇合公共题
+模板完整 JSON 原文：
+```json
+{
+  "id": "progressive_drilldown",
+  "name": "分层深入模板 (Progressive Drill-down)",
+  "description": "一级主分类，按选项分流至各自专属子题，最后汇合公共题",
+  "questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true,
+      "jump": [
+        { "when": { "q1": 0 }, "to": "q2" },
+        { "when": { "q1": 1 }, "to": "q3" },
+        { "when": { "q1": 2 }, "to": "q4" }
+      ]
+    },
+    {
+      "id": "q2",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q3",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q4",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B"],
+      "required": true,
+      "jump": "q5"
+    },
+    {
+      "id": "q5",
+      "type": "single_choice",
+      "title": "问题",
+      "options": ["选项A", "选项B", "选项C"],
+      "required": true
+    }
+  ]
+}
+```
+
+请直接输出符合契约的纯 JSON 问卷数据：
+```
+
+### 📤 LLM 产出内容
+#### 🤖 LLM 原始返回
+```json
+{"title":"企业业务综合满意度与全流程体验调研问卷","description":"感谢您参与本次调研。本问卷旨在了解贵企业与我方合作全流程中的体验与满意度，预计用时约5分钟。您的反馈将仅用于服务改进，信息将严格保密。","questions":[{"id":"q1","type":"single_choice","title":"贵企业所属行业是？","options":["制造业","信息技术/互联网","批发零售/贸易","金融/保险","医疗健康","建筑/房地产","专业服务/咨询","其他"]},{"id":"q2","type":"single_choice","title":"您在企业中主要承担的角色是？","options":["决策/采购负责人","业务使用部门负责人","财务/行政支持人员","技术人员","其他"]},{"id":"q3","type":"single_choice","title":"您本次主要评价的业务合作类型是？","options":["软件/数字化服务","专业咨询/外包","设备/物资供应","工程/集成项目","其他"],"jump":[{"when":{"q3":0},"to":"q4"},{"when":{"q3":1},"to":"q5"},{"when":{"q3":2},"to":"q6"},{"when":{"q3":3},"to":"q7"},{"when":{"q3":4},"to":"q8"}]},{"id":"q4","type":"single_choice","title":"您对软件/数字化服务售前方案与产品演示的专业度评价是？","options":["非常专业","比较专业","一般","不太专业","非常不专业"],"jump":[{"to":"q9"}]},{"id":"q5","type":"single_choice","title":"您对咨询/外包团队的专业能力与投入度评价是？","options":["非常专业","比较专业","一般","不太专业","非常不专业"],"jump":[{"to":"q9"}]},{"id":"q6","type":"single_choice","title":"您对设备/物资供应的产品质量与供货稳定性评价是？","options":["非常满意","比较满意","一般","不太满意","非常不满意"],"jump":[{"to":"q9"}]},{"id":"q7","type":"single_choice","title":"您对工程/集成项目的项目管理与交付质量评价是？","options":["非常满意","比较满意","一般","不太满意","非常不满意"],"jump":[{"to":"q9"}]},{"id":"q8","type":"single_choice","title":"您对该业务整体服务与需求匹配度的评价是？","options":["非常匹配","比较匹配","一般","不太匹配","非常不匹配"],"jump":[{"to":"q9"}]},{"id":"q9","type":"multiple_choice","title":"您在选择该供应商/合作伙伴时最看重哪些因素？","options":["方案专业度","价格/性价比","交付速度","服务响应","过往合作经验","品牌口碑","定制化能力","合规与安全性","其他"]},{"id":"q10","type":"single_choice","title":"从首次接触到签约的整体流程是否顺畅？","options":["非常顺畅","比较顺畅","一般","不太顺畅","非常不顺畅"],"jump":[{"when":{"q10":3},"to":"q11"},{"when":{"q10":4},"to":"q11"},{"else":true,"to":"q12"}]},{"id":"q11","type":"multiple_choice","title":"您认为签约前流程中不够顺畅的环节有哪些？","options":["需求沟通","方案确认","报价与合同","审批流程","交付排期","验收结算","其他"]},{"id":"q12","type":"single_choice","title":"交付/实施阶段是否按约定完成？","options":["是，完全按约定","基本按约定，有小偏差","部分未按约定","否，明显未按约定"],"jump":[{"when":{"q12":2},"to":"q13"},{"when":{"q12":3},"to":"q13"},{"else":true,"to":"q14"}]},{"id":"q13","type":"multiple_choice","title":"未按约定完成的主要原因有哪些？","options":["需求变更频繁","资源投入不足","沟通协调不畅","技术/方案限制","第三方配合问题","排期冲突","其他"]},{"id":"q14","type":"likert_scale","title":"请根据您的实际合作体验，对以下环节进行满意度评分。","options":["非常不满意","不满意","一般","满意","非常满意"],"statements":["需求沟通与理解准确度","方案与业务匹配度","合同与商务流程效率","交付实施进度与质量","售后服务响应速度","问题解决彻底性"]},{"id":"q15","type":"multiple_choice","title":"您在使用/合作过程中遇到过哪些问题？","options":["响应速度慢","沟通不顺畅","交付延期","质量不稳定","功能/方案不匹配","费用不透明","售后支持不足","未遇到明显问题"],"jump":[{"when":{"q15":{"has":7}},"to":"q17"}]},{"id":"q16","type":"text_input","title":"请简要描述您遇到的最突出问题或最需要改进的场景：","placeholder":"例如：售后响应超过约定时限、交付文档不完整等"},{"id":"q17","type":"single_choice","title":"您未来继续合作/续约的意愿是？","options":["一定会继续合作","可能会继续合作","不确定","可能不会继续合作","一定不会继续合作"],"jump":[{"when":{"q17":3},"to":"q18"},{"when":{"q17":4},"to":"q18"},{"else":true,"to":"q19"}]},{"id":"q18","type":"text_input","title":"请说明您不愿继续合作的主要原因：","placeholder":"例如：价格、服务、质量、响应速度等"},{"id":"q19","type":"single_choice","title":"您向其他企业推荐该业务/服务的可能性有多大？","options":["0 完全不可能","1","2","3","4","5","6","7","8","9","10 非常可能"]},{"id":"q20","type":"text_input","title":"您还有其他意见或建议吗？","placeholder":"欢迎补充任何有助于我们改进的信息"}]}
+```
+
+---

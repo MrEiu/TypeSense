@@ -164,9 +164,10 @@ interface JumpRule {
   to: string;          // 目标题号 "qK"、正常完成 "end" 或淘汰退出 "exit"
 }
 
-逻辑规则：
+规则与规范：
 ${logicInstruction}
-- 题号必须严格从 q1 顺序递增到 q${targetCount}。`;
+- 题号必须严格从 q1 顺序递增到 q${targetCount}。
+- 量表题（likert_scale）：为多维度矩阵评分题型，必须同时包含 options（横向评分刻度，如 ["非常不满意","不满意","一般","满意","非常满意"]）与 statements（纵向被评价的 3~6 个具体维度/子条目，如 ["功能完备度", "界面易用性", "系统稳定性"]），严禁遗漏 statements 字段！`;
 
     const templateContext = options.templateIds && options.templateIds.length > 0
       ? TemplateService.formatTemplatesForPrompt(options.templateIds)
@@ -212,17 +213,29 @@ ${logicInstruction}
         const type = ['single_choice', 'multiple_choice', 'likert_scale', 'text_input'].includes(q.type)
           ? q.type
           : 'single_choice';
-        let options = Array.isArray(q.options) ? q.options : undefined;
-        let statements = Array.isArray(q.statements) ? q.statements : undefined;
+
+        const rawOptions = Array.isArray(q.options) ? q.options : [];
+        let options = rawOptions
+          .map((o: any) => (typeof o === 'string' ? o : o?.label || o?.title || String(o)))
+          .filter((o: string) => o.trim());
+
+        const rawStatements = q.statements || q.rows || q.items || q.sub_questions || q.subQuestions || q.dimensions || q.aspects;
+        let statements = Array.isArray(rawStatements)
+          ? rawStatements
+              .map((s: any) => (typeof s === 'string' ? s : s?.label || s?.title || String(s)))
+              .filter((s: string) => s.trim())
+          : undefined;
+
         if (type === 'likert_scale') {
           if (!options || options.length === 0) options = ['非常不满意', '不满意', '一般', '满意', '非常满意'];
-          if (!statements || statements.length === 0) statements = ['整体评价'];
+          if (!statements || statements.length === 0) statements = ['整体表现与综合满意度'];
         }
+
         return {
           id,
           type,
           title: q.title || `题目 ${i + 1}`,
-          options: type === 'text_input' ? undefined : options,
+          options: type === 'text_input' ? undefined : (options.length > 0 ? options : undefined),
           statements: type === 'likert_scale' ? statements : undefined,
           placeholder: q.placeholder,
           required: q.required !== false,
