@@ -307,7 +307,7 @@ onMounted(() => {
   <NConfigProvider :theme-overrides="themeOverrides">
     <NNotificationProvider placement="bottom-right">
       <NMessageProvider>
-        <NLayout has-sider style="min-height: 100vh; background-color: var(--zen-bg, #f8fafc);">
+        <NLayout has-sider style="height: 100vh; width: 100vw; overflow: hidden; background-color: var(--zen-bg, #f8fafc);" content-style="height: 100%; width: 100%; display: flex; overflow: hidden;">
         <!-- 左侧可折叠侧边栏 -->
         <NLayoutSider
           bordered
@@ -372,8 +372,8 @@ onMounted(() => {
           </div>
         </NLayoutSider>
 
-        <!-- 右侧主体框架 -->
-        <NLayout style="background-color: var(--zen-bg, #f8fafc);">
+        <!-- 右侧主体框架 (全高直接 Flexbox，视口 100% 绝对铺满) -->
+        <div style="flex: 1; min-width: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; background-color: var(--zen-bg, #f8fafc);">
           <!-- 顶栏 Header -->
           <NLayoutHeader
             bordered
@@ -484,15 +484,15 @@ onMounted(() => {
             </div>
           </NLayoutHeader>
 
-          <!-- 主内容区域 Content -->
-          <NLayoutContent style="flex: 1; min-height: 0; padding: 18px 24px 20px 24px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column;">
-            <!-- 1. 问卷资产管理视图 (自适应填满视口) -->
+          <!-- 主内容区域 (视口全屏自适应，完全撑满视口) -->
+          <div style="flex: 1; min-height: 0; height: calc(100vh - 64px); padding: 18px 24px 20px 24px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden;">
+            <!-- 1. 问卷资产管理视图 (自适应填满全屏视口) -->
             <div
               v-if="activeMenuKey === 'all_surveys'"
-              class="console-workspace-container"
+              class="console-workspace-panel"
             >
-              <!-- 顶部工具栏卡片 (常驻顶端) -->
-              <div class="console-filter-bar-card">
+              <!-- 顶部工具栏 (常驻顶端) -->
+              <div class="panel-toolbar-header">
                 <SurveyFilterToolbar
                   v-model:filterTab="currentFilterTab"
                   v-model:sortBy="sortBy"
@@ -501,7 +501,7 @@ onMounted(() => {
               </div>
 
               <!-- 中间问卷列表区 (自适应撑满，超出自然滚动) -->
-              <div class="console-survey-scroll-area">
+              <div class="panel-content-scroll">
                 <!-- 加载中 -->
                 <div v-if="loading" style="padding: 80px 0; text-align: center;">
                   <NSpin size="large" />
@@ -548,8 +548,8 @@ onMounted(() => {
                 </div>
               </div>
 
-              <!-- 底部分页控制器 (常驻自然吸底) -->
-              <div v-if="filteredSurveys.length > 0" class="console-pagination-footer-card">
+              <!-- 底部分页控制器 (常驻吸底) -->
+              <div v-if="filteredSurveys.length > 0" class="panel-pagination-footer">
                 <div class="footer-total-text">
                   共 <strong style="color: #4f46e5;">{{ filteredSurveys.length }}</strong> 份问卷
                 </div>
@@ -721,8 +721,8 @@ onMounted(() => {
                   </template>
                 </NCard>
               </div>
-          </NLayoutContent>
-        </NLayout>
+          </div>
+        </div>
 
         <!-- 侧弹窗 1：作答数据分析与明细抽屉 -->
         <SurveyResponsesDrawer
@@ -774,49 +774,50 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.console-workspace-container {
+.console-workspace-panel {
   display: flex;
   flex-direction: column;
   height: 100%;
+  flex: 1;
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-  gap: 12px;
   min-height: 0;
-}
-
-.console-filter-bar-card {
   background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 12px;
-  padding: 10px 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+}
+
+.panel-toolbar-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  background: #ffffff;
   flex-shrink: 0;
 }
 
-.console-survey-scroll-area {
+.panel-content-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
+  padding: 18px 20px;
+  background: #f8fafc;
 }
 
 .empty-survey-box {
   background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  border: 1px dashed rgba(15, 23, 42, 0.12);
   border-radius: 12px;
   padding: 80px 0;
   display: flex;
   justify-content: center;
   align-items: center;
+  margin: 20px 0;
 }
 
-.console-pagination-footer-card {
+.panel-pagination-footer {
+  padding: 10px 20px;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
   background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 12px;
-  padding: 10px 18px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   display: flex;
   justify-content: space-between;
   align-items: center;
