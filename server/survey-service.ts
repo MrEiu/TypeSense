@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from './db';
+import { db, SURVEYS_DIR } from './db';
 import { generateSurveyId, generateShortCode } from './id-generator';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,7 +27,103 @@ export interface SurveySummaryItem {
 
 export class SurveyService {
   /**
-   * 获取所有问卷列表及当前已收集答卷数
+   * Helper: Get absolute file path for a survey JSON file
+   */
+  public static getSurveyFilePath(id: string): string {
+    return path.join(SURVEYS_DIR, `${id}.json`);
+  }
+
+  /**
+   * Helper: Read survey directly from file system
+   */
+  public static readSurveyFile(id: string): Record<string, unknown> | null {
+    try {
+      const filePath = this.getSurveyFilePath(id);
+      if (!fs.existsSync(filePath)) return null;
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(content) as Record<string, unknown>;
+    } catch (err) {
+      console.error(`[SurveyService] Failed to read survey file for ${id}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Helper: Write survey directly to file system
+   */
+  public static writeSurveyFile(id: string, data: Record<string, unknown>): void {
+    const filePath = this.getSurveyFilePath(id);
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  }
+
+  /**
+   * Helper: Delete survey file from file system
+   */
+  public static deleteSurveyFile(id: string): void {
+    const filePath = this.getSurveyFilePath(id);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+
+  /**
+   * Database to file system migration:
+   * Migrates all surveys from SQLite database table to data/surveys/<id>.json
+   */
+  public static migrateSurveysFromDbToFileSystem(): { migratedCount: number; skippedCount: number } {
+    let migratedCount = 0;
+    let skippedCount = 0;
+
+    try {
+      const rows = db.prepare(`SELECT id, slug, title, description, schema_json FROM surveys`).all() as Array<{
+        id: string;
+        slug: string;
+        title: string;
+        description: string | null;
+        schema_json: string;
+      }>;
+
+      for (const row of rows) {
+        const filePath = this.getSurveyFilePath(row.id);
+        if (!fs.existsSync(filePath)) {
+          try {
+            let parsed: Record<string, unknown>;
+            try {
+              parsed = JSON.parse(row.schema_json);
+            } catch {
+              parsed = {
+                id: row.id,
+                slug: row.slug,
+                title: row.title,
+                description: row.description || '',
+                questions: [],
+              };
+            }
+            parsed.id = row.id;
+            parsed.slug = row.slug || row.id;
+            if (!parsed.title) parsed.title = row.title;
+            this.writeSurveyFile(row.id, parsed);
+            migratedCount++;
+          } catch (err) {
+            console.error(`[SurveyService] Failed to migrate survey ${row.id}:`, err);
+          }
+        } else {
+          skippedCount++;
+        }
+      }
+
+      if (migratedCount > 0) {
+        console.info(`[SurveyService] Successfully migrated ${migratedCount} survey(s) from SQLite to data/surveys/`);
+      }
+    } catch (err) {
+      console.error('[SurveyService] Survey migration error:', err);
+    }
+
+    return { migratedCount, skippedCount };
+  }
+
+  /**
+   * List all surveys and their response counts
    */
   public static listSurveys(): SurveySummaryItem[] {
     const rows = db.prepare(`
@@ -56,21 +152,41 @@ export class SurveyService {
     return rows.map((row) => {
       let questionsCount = 0;
       let status: 'published' | 'paused' = 'published';
-      try {
-        const parsed = JSON.parse(row.schema_json);
-        questionsCount = Array.isArray(parsed.questions) ? parsed.questions.length : 0;
-        if (parsed.status === 'paused') {
+      let title = row.title;
+      let description = row.description || '';
+
+      // Prefer reading file content from data/surveys/ if present
+      const fileData = this.readSurveyFile(row.id);
+      if (fileData) {
+        if (Array.isArray(fileData.questions)) {
+          questionsCount = fileData.questions.length;
+        }
+        if (fileData.status === 'paused') {
           status = 'paused';
         }
-      } catch {
-        questionsCount = 0;
+        if (typeof fileData.title === 'string' && fileData.title) {
+          title = fileData.title;
+        }
+        if (typeof fileData.description === 'string') {
+          description = fileData.description;
+        }
+      } else {
+        try {
+          const parsed = JSON.parse(row.schema_json);
+          questionsCount = Array.isArray(parsed.questions) ? parsed.questions.length : 0;
+          if (parsed.status === 'paused') {
+            status = 'paused';
+          }
+        } catch {
+          questionsCount = 0;
+        }
       }
 
       return {
         id: row.id,
         slug: row.slug,
-        title: row.title,
-        description: row.description || '',
+        title,
+        description,
         questionsCount,
         responseCount: Number(row.response_count) || 0,
         createdAt: row.created_at,
@@ -80,9 +196,17 @@ export class SurveyService {
   }
 
   /**
-   * 按算法生成 ID 或语义 Slug 获取完整问卷
+   * Get full survey definition by generated ID or slug (reads from data/surveys/<id>.json)
    */
   public static getSurvey(idOrSlug: string): Record<string, unknown> | null {
+    // 1. Check direct file by ID
+    const directFile = this.readSurveyFile(idOrSlug);
+    if (directFile) {
+      if (!directFile.status) directFile.status = 'published';
+      return directFile;
+    }
+
+    // 2. Lookup ID by slug or ID in SQLite
     const row = db.prepare(`
       SELECT id, slug, schema_json FROM surveys 
       WHERE id = ? OR slug = ?
@@ -91,13 +215,20 @@ export class SurveyService {
 
     if (!row) return null;
 
+    // 3. Check resolved ID file
+    const resolvedFile = this.readSurveyFile(row.id);
+    if (resolvedFile) {
+      if (!resolvedFile.status) resolvedFile.status = 'published';
+      return resolvedFile;
+    }
+
+    // 4. Fallback to DB schema_json and write file for future fast reads
     try {
       const parsed = JSON.parse(row.schema_json) as Record<string, unknown>;
       parsed.id = row.id;
       parsed.slug = row.slug;
-      if (!parsed.status) {
-        parsed.status = 'published';
-      }
+      if (!parsed.status) parsed.status = 'published';
+      this.writeSurveyFile(row.id, parsed);
       return parsed;
     } catch {
       return null;
@@ -105,38 +236,41 @@ export class SurveyService {
   }
 
   /**
-   * 更新问卷收集状态（开启/暂停）
+   * Update survey collection status (published/paused)
    */
   public static updateSurveyStatus(idOrSlug: string, status: 'published' | 'paused'): boolean {
     const row = db.prepare(`
-      SELECT id, schema_json FROM surveys 
+      SELECT id, slug, schema_json FROM surveys 
       WHERE id = ? OR slug = ?
       LIMIT 1
-    `).get(idOrSlug, idOrSlug) as { id: string; schema_json: string } | undefined;
+    `).get(idOrSlug, idOrSlug) as { id: string; slug: string; schema_json: string } | undefined;
 
     if (!row) return false;
 
     try {
-      const parsed = JSON.parse(row.schema_json);
+      let parsed = this.readSurveyFile(row.id);
+      if (!parsed) {
+        parsed = JSON.parse(row.schema_json || '{}');
+      }
       parsed.status = status;
-      const updatedJson = JSON.stringify(parsed, null, 2);
-      const now = new Date().toISOString();
+      this.writeSurveyFile(row.id, parsed);
 
+      const now = new Date().toISOString();
       const stmt = db.prepare(`
         UPDATE surveys 
         SET schema_json = ?, updated_at = ?
         WHERE id = ?
       `);
-      const result = stmt.run(updatedJson, now, row.id);
-      return Number(result.changes) > 0;
+      stmt.run(JSON.stringify(parsed, null, 2), now, row.id);
+      return true;
     } catch (err) {
-      console.error('[SurveyService] 更新状态失败:', err);
+      console.error('[SurveyService] Failed to update status:', err);
       return false;
     }
   }
 
   /**
-   * 更新已有问卷内容 (Schema, 题目, 标题, 描述)
+   * Update existing survey content (schema, questions, title, description)
    */
   public static updateSurvey(
     idOrSlug: string,
@@ -156,7 +290,11 @@ export class SurveyService {
 
     try {
       const now = new Date().toISOString();
-      const existingParsed = JSON.parse(row.schema_json || '{}');
+      let existingParsed = this.readSurveyFile(row.id);
+      if (!existingParsed) {
+        existingParsed = JSON.parse(row.schema_json || '{}');
+      }
+
       const title = data.title || existingParsed.title || '未命名问卷';
       const description = data.description !== undefined ? data.description : (existingParsed.description || '');
 
@@ -167,8 +305,13 @@ export class SurveyService {
         slug: row.slug,
         title,
         description,
+        updatedAt: now,
       };
 
+      // Write to data/surveys/<id>.json
+      this.writeSurveyFile(row.id, mergedSchema);
+
+      // Sync SQLite row
       const stmt = db.prepare(`
         UPDATE surveys 
         SET title = ?, description = ?, schema_json = ?, updated_at = ?
@@ -177,13 +320,13 @@ export class SurveyService {
       const result = stmt.run(title, description, JSON.stringify(mergedSchema, null, 2), now, row.id);
       return Number(result.changes) > 0;
     } catch (err) {
-      console.error('[SurveyService] 更新问卷内容失败:', err);
+      console.error('[SurveyService] Failed to update survey content:', err);
       return false;
     }
   }
 
   /**
-   * 新建或发布问卷（ID 强制由算法生成）
+   * Create or publish survey
    */
   public static createSurvey(data: {
     title: string;
@@ -201,8 +344,14 @@ export class SurveyService {
       slug,
       title: data.title,
       description: data.description || '',
+      createdAt: now,
+      updatedAt: now,
     };
 
+    // 1. Write file to data/surveys/<id>.json
+    this.writeSurveyFile(surveyId, schemaToSave);
+
+    // 2. Sync to SQLite for FK integrity (links and responses)
     const stmt = db.prepare(`
       INSERT INTO surveys (id, slug, title, description, schema_json, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -222,19 +371,29 @@ export class SurveyService {
   }
 
   /**
-   * 删除问卷
+   * Delete survey and its file
    */
   public static deleteSurvey(idOrSlug: string): boolean {
+    const row = db.prepare(`SELECT id FROM surveys WHERE id = ? OR slug = ? LIMIT 1`).get(
+      idOrSlug,
+      idOrSlug
+    ) as { id: string } | undefined;
+
+    const targetId = row ? row.id : idOrSlug;
+
+    // Remove file
+    this.deleteSurveyFile(targetId);
+
+    // Remove DB record
     const stmt = db.prepare(`DELETE FROM surveys WHERE id = ? OR slug = ?`);
     const result = stmt.run(idOrSlug, idOrSlug);
     return Number(result.changes) > 0;
   }
 
   /**
-   * 为问卷算法生成一个唯一访问短码
+   * Generate unique short link code for a survey
    */
   public static createLink(surveyIdOrSlug: string): { code: string; surveyId: string } | null {
-    // 确认问卷存在并取得算法真实 ID
     const surveyRow = db.prepare(`SELECT id FROM surveys WHERE id = ? OR slug = ? LIMIT 1`).get(
       surveyIdOrSlug,
       surveyIdOrSlug
@@ -256,7 +415,7 @@ export class SurveyService {
   }
 
   /**
-   * 根据短访问码解析目标问卷 ID
+   * Resolve target survey ID from short code
    */
   public static resolveLink(code: string): string | null {
     const row = db.prepare(`SELECT survey_id FROM survey_links WHERE code = ? LIMIT 1`).get(code) as
@@ -266,73 +425,12 @@ export class SurveyService {
   }
 
   /**
-   * 首次启动自动将 static JSON 问卷作为种子数据入库
+   * Initialize default seed surveys and sync them to data/surveys/
    */
   public static initSeedSurveys(): void {
-    const surveysDir = path.resolve(__dirname, '../public/data/surveys');
-    if (fs.existsSync(surveysDir)) {
-      const files = fs.readdirSync(surveysDir).filter((f) => f.endsWith('.json') && f !== 'manifest.json');
+    // Run DB migration first
+    this.migrateSurveysFromDbToFileSystem();
 
-      files.forEach((file) => {
-      try {
-        const filePath = path.join(surveysDir, file);
-        const content = fs.readFileSync(filePath, 'utf-8');
-        const parsed = JSON.parse(content);
-
-        const slug = parsed.id || path.basename(file, '.json');
-        const existing = db.prepare(`SELECT id FROM surveys WHERE slug = ?`).get(slug) as { id: string } | undefined;
-
-        if (existing) {
-          // 同步最新 schema 内容
-          const schemaToSave = {
-            ...parsed,
-            id: existing.id,
-            slug,
-          };
-          db.prepare(`
-            UPDATE surveys SET schema_json = ?, title = ?, description = ?, updated_at = ?
-            WHERE id = ?
-          `).run(JSON.stringify(schemaToSave, null, 2), parsed.title || slug, parsed.description || '', new Date().toISOString(), existing.id);
-          return;
-        }
-
-        const surveyId = generateSurveyId();
-        const now = new Date().toISOString();
-
-        const schemaToSave = {
-          ...parsed,
-          id: surveyId,
-          slug,
-        };
-
-        db.prepare(`
-          INSERT INTO surveys (id, slug, title, description, schema_json, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          surveyId,
-          slug,
-          parsed.title || slug,
-          parsed.description || '',
-          JSON.stringify(schemaToSave, null, 2),
-          now,
-          now
-        );
-
-        // 默认自动配一个访问短码
-        const defaultCode = generateShortCode();
-        db.prepare(`
-          INSERT INTO survey_links (code, survey_id, created_at)
-          VALUES (?, ?, ?)
-        `).run(defaultCode, surveyId, now);
-
-        console.info(`[SurveyService] 种子问卷 [${slug}] 已导入数据库，ID: ${surveyId}，短码: ${defaultCode}`);
-      } catch (err) {
-        console.error(`[SurveyService] 导入种子问卷 ${file} 失败:`, err);
-      }
-    });
-  }
-
-    // 确保库中至少拥有一份开箱即用的默认示范问卷 (survey_tech_2026)
     const seedSlug = 'survey_tech_2026';
     const existingSeed = db.prepare(`SELECT id FROM surveys WHERE slug = ? OR id = ?`).get(seedSlug, seedSlug);
     if (!existingSeed) {
@@ -390,6 +488,8 @@ export class SurveyService {
         ],
       };
       const now = new Date().toISOString();
+      this.writeSurveyFile(seedSlug, defaultSeed);
+
       db.prepare(`
         INSERT INTO surveys (id, slug, title, description, schema_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -406,7 +506,20 @@ export class SurveyService {
         INSERT INTO survey_links (code, survey_id, created_at)
         VALUES (?, ?, ?)
       `).run('tech2026', seedSlug, now);
-      console.info(`[SurveyService] 默认示范问卷 [${seedSlug}] 已导入数据库。`);
+      console.info(`[SurveyService] Default seed survey [${seedSlug}] initialized and saved to data/surveys/.`);
+    } else {
+      // Ensure seed survey file exists on disk
+      if (!fs.existsSync(this.getSurveyFilePath(seedSlug))) {
+        const row = db.prepare(`SELECT schema_json FROM surveys WHERE id = ? OR slug = ? LIMIT 1`).get(seedSlug, seedSlug) as { schema_json: string } | undefined;
+        if (row) {
+          try {
+            this.writeSurveyFile(seedSlug, JSON.parse(row.schema_json));
+          } catch {
+            // ignore
+          }
+        }
+      }
     }
   }
 }
+

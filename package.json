@@ -10,7 +10,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "bump": "tsx scripts/bump-version.ts",
-    "init": "tsx scripts/init-config.ts"
+    "init": "tsx scripts/init-config.ts",
+    "migrate:surveys": "tsx server/migrate-surveys.ts"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -35,6 +36,7 @@
     "express": "^5.2.1",
     "lucide-vue-next": "^0.577.0",
     "mammoth": "^1.12.2",
+    "marked": "^18.0.13",
     "motion": "^13.2.0",
     "multer": "^2.3.0",
     "naive-ui": "^2.45.3",

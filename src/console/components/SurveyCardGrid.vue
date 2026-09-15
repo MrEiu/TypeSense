@@ -15,6 +15,7 @@ import {
   Check,
   Calendar,
   Layers,
+  Sparkles,
 } from 'lucide-vue-next';
 import type { SurveyMetadataItem } from '../../services/questionnaire-repository-service';
 import { TsButton, TsBadge, TsSwitch } from '../../components/ui';
@@ -26,6 +27,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'open-responses', survey: SurveyMetadataItem): void;
   (e: 'open-detail', survey: SurveyMetadataItem): void;
+  (e: 'open-ai-edit', survey: SurveyMetadataItem): void;
   (e: 'toggle-status', survey: SurveyMetadataItem, active: boolean): void;
   (e: 'delete', survey: SurveyMetadataItem): void;
   (e: 'copy-slug', survey: SurveyMetadataItem): void;
@@ -187,7 +189,18 @@ function handleDropdownSelect(key: string, survey: SurveyMetadataItem) {
               <span>体验</span>
             </TsButton>
 
-            <!-- 4. 编排 -->
+            <!-- 4. AI 局部编辑 -->
+            <TsButton
+              variant="secondary"
+              size="sm"
+              title="使用 AI 局部行块精准编辑问卷"
+              @click="emit('open-ai-edit', item)"
+            >
+              <Sparkles style="width: 13px; height: 13px; color: #4f46e5;" />
+              <span>AI编辑</span>
+            </TsButton>
+
+            <!-- 5. 编排 -->
             <TsButton
               as="a"
               :href="`/studio.html?id=${encodeURIComponent(item.slug || item.id)}`"

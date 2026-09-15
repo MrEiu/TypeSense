@@ -18,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'open-responses', survey: SurveyMetadataItem): void;
   (e: 'open-detail', survey: SurveyMetadataItem): void;
+  (e: 'open-ai-edit', survey: SurveyMetadataItem): void;
   (e: 'toggle-status', survey: SurveyMetadataItem, active: boolean): void;
   (e: 'delete', survey: SurveyMetadataItem): void;
 }>();
@@ -113,7 +114,7 @@ const tableColumns: DataTableColumns<SurveyMetadataItem> = [
   {
     title: '操作',
     key: 'actions',
-    width: 250,
+    width: 310,
     render(row) {
       return h(NSpace, { size: 6 }, () => [
         h(
@@ -135,6 +136,17 @@ const tableColumns: DataTableColumns<SurveyMetadataItem> = [
             onClick: () => emit('open-responses', row),
           },
           { default: () => '数据' }
+        ),
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            secondary: true,
+            type: 'default',
+            style: 'color: #4f46e5; border-color: #c7d2fe;',
+            onClick: () => emit('open-ai-edit', row),
+          },
+          { default: () => 'AI编辑' }
         ),
         h(
           NButton,

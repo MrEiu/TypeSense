@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, h } from 'vue';
 import {
   NConfigProvider,
+  NNotificationProvider,
   NMessageProvider,
   NLayout,
   NLayoutSider,
@@ -47,6 +48,7 @@ import SurveyPublishModal from './components/SurveyPublishModal.vue';
 import SurveyResponsesDrawer from './components/SurveyResponsesDrawer.vue';
 import SurveyDetailDrawer from './components/SurveyDetailDrawer.vue';
 import AiSurveyStudioModal from './components/AiSurveyStudioModal.vue';
+import AiSurveyEditorModal from './components/AiSurveyEditorModal.vue';
 import LlmConfigModal from './components/LlmConfigModal.vue';
 import AuthModal from '../components/auth/AuthModal.vue';
 
@@ -82,6 +84,15 @@ const surveys = ref<SurveyMetadataItem[]>([]);
 const loading = ref(true);
 const isPublishModalOpen = ref(false);
 const isAiStudioOpen = ref(false);
+
+// AI 局部编辑状态
+const isAiEditorModalOpen = ref(false);
+const selectedSurveyForAiEdit = ref<SurveyMetadataItem | null>(null);
+
+function openAiEditor(survey: SurveyMetadataItem) {
+  selectedSurveyForAiEdit.value = survey;
+  isAiEditorModalOpen.value = true;
+}
 
 // 侧边栏与主视图状态
 const activeMenuKey = ref<string>('all_surveys');
@@ -279,8 +290,9 @@ onMounted(() => {
 
 <template>
   <NConfigProvider :theme-overrides="themeOverrides">
-    <NMessageProvider>
-      <NLayout has-sider style="min-height: 100vh; background-color: var(--zen-bg, #f8fafc);">
+    <NNotificationProvider placement="bottom-right">
+      <NMessageProvider>
+        <NLayout has-sider style="min-height: 100vh; background-color: var(--zen-bg, #f8fafc);">
         <!-- 左侧可折叠侧边栏 -->
         <NLayoutSider
           bordered
@@ -486,6 +498,7 @@ onMounted(() => {
                     :surveys="filteredSurveys"
                     @open-responses="openResponsesDrawer"
                     @open-detail="openDetailDrawer"
+                    @open-ai-edit="openAiEditor"
                     @toggle-status="toggleSurveyStatus"
                     @delete="handleDeleteSurvey"
                     @copy-slug="handleCopySlug"
@@ -498,6 +511,7 @@ onMounted(() => {
                     :surveys="filteredSurveys"
                     @open-responses="openResponsesDrawer"
                     @open-detail="openDetailDrawer"
+                    @open-ai-edit="openAiEditor"
                     @toggle-status="toggleSurveyStatus"
                     @delete="handleDeleteSurvey"
                   />
@@ -688,6 +702,7 @@ onMounted(() => {
         <SurveyDetailDrawer
           v-model:show="isDetailDrawerOpen"
           :survey="selectedSurvey"
+          @open-ai-edit="openAiEditor"
           @status-changed="loadSurveys"
         />
 
@@ -699,6 +714,13 @@ onMounted(() => {
 
         <!-- 弹窗 4：AI 问卷智造工坊 Modal -->
         <AiSurveyStudioModal v-model:show="isAiStudioOpen" @created="loadSurveys" />
+
+        <!-- 弹窗 4.5：AI 问卷局部智能编辑 Modal -->
+        <AiSurveyEditorModal
+          v-model:show="isAiEditorModalOpen"
+          :survey="selectedSurveyForAiEdit"
+          @survey-updated="loadSurveys"
+        />
 
         <!-- 弹窗 5：大模型服务接入配置 Modal -->
         <LlmConfigModal
@@ -715,7 +737,8 @@ onMounted(() => {
         />
       </NLayout>
     </NMessageProvider>
-  </NConfigProvider>
+  </NNotificationProvider>
+</NConfigProvider>
 </template>
 
 <style scoped>

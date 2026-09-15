@@ -144,7 +144,7 @@ export class AiGeneratorClientService {
   }
 
   /**
-   * 极速直出全卷 (一步到位生成完整问卷)
+   * 极速直出全卷 (一步到位生成完整问卷并自动持久化)
    */
   public static async generateDirectSurvey(params: {
     prompt: string;
@@ -152,7 +152,15 @@ export class AiGeneratorClientService {
     templateIds?: string[];
     targetCount: number;
     enableJumpLogic?: boolean;
-  }): Promise<QuestionnaireModel> {
+  }): Promise<{
+    survey: QuestionnaireModel;
+    saved: {
+      id: string;
+      slug: string;
+      accessUrl: string;
+      canvasUrl: string;
+    };
+  }> {
     const resp = await fetch('/api/ai/generate-direct', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -165,7 +173,10 @@ export class AiGeneratorClientService {
     }
 
     const data = await resp.json();
-    return data.survey as QuestionnaireModel;
+    return {
+      survey: data.survey as QuestionnaireModel,
+      saved: data.saved,
+    };
   }
 
   /**

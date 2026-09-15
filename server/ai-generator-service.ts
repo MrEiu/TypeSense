@@ -101,6 +101,10 @@ export class AiGeneratorService {
     const prompt = (options.prompt || '').trim();
     const enableJump = options.enableJumpLogic !== false;
 
+    const logicInstruction = enableJump
+      ? `逻辑跳转规则：在有明确分流需要时（如特定选项筛选、不同受众分类）配置关键节点单向向前跳转（jump 字段）。`
+      : `逻辑跳转规则：本次调研无需条件分支跳转逻辑，请采用线性自然推进流程（严禁在任何题目中生成 jump 字段）。`;
+
     const systemPrompt = `你是一位调研设计专家。请根据用户需求生成结构化问卷 JSON。
 必须直接输出符合以下 TypeScript 契约的纯 JSON 数据，严禁输出任何 Markdown 标记或多余文字。
 
@@ -160,12 +164,13 @@ interface JumpRule {
   to: string;          // 目标题号 "qK"、正常完成 "end" 或淘汰退出 "exit"
 }
 
-逻辑模板与拓扑规则：
-- 拓扑骨架：模板定义关键节点的跳转分支与流转规则（如前置筛选、深度追问等）。
-- 语义填充：遵循模板的流转网络，结合用户的具体调研需求生成对应的题干、选项及评价维度。
-- 缺省行为：未选用模板时，默认采用线性自然推进，仅在有明确分流需要时自主配置关键节点（跳转必须单向向前）。`;
+逻辑规则：
+${logicInstruction}
+- 题号必须严格从 q1 顺序递增到 q${targetCount}。`;
 
-    const templateContext = TemplateService.formatTemplatesForPrompt(options.templateIds);
+    const templateContext = options.templateIds && options.templateIds.length > 0
+      ? TemplateService.formatTemplatesForPrompt(options.templateIds)
+      : '';
 
     const userPrompt = [
       `调研需求：${prompt || '用户综合体验与满意度调研'}`,
@@ -187,7 +192,7 @@ interface JumpRule {
             { role: 'user', content: userPrompt },
           ],
         },
-        { targetCount, enableJumpLogic: options.enableJumpLogic },
+        { targetCount, enableJumpLogic: enableJump },
         { onThought }
       );
 
@@ -207,15 +212,22 @@ interface JumpRule {
         const type = ['single_choice', 'multiple_choice', 'likert_scale', 'text_input'].includes(q.type)
           ? q.type
           : 'single_choice';
+        let options = Array.isArray(q.options) ? q.options : undefined;
+        let statements = Array.isArray(q.statements) ? q.statements : undefined;
+        if (type === 'likert_scale') {
+          if (!options || options.length === 0) options = ['非常不满意', '不满意', '一般', '满意', '非常满意'];
+          if (!statements || statements.length === 0) statements = ['整体评价'];
+        }
         return {
           id,
           type,
           title: q.title || `题目 ${i + 1}`,
-          options: Array.isArray(q.options) ? q.options : undefined,
+          options: type === 'text_input' ? undefined : options,
+          statements: type === 'likert_scale' ? statements : undefined,
           placeholder: q.placeholder,
           required: q.required !== false,
           set: q.set && typeof q.set === 'object' ? q.set : undefined,
-          jump: q.jump,
+          jump: enableJump ? q.jump : undefined,
         };
       });
 
@@ -574,16 +586,26 @@ ${jumpInstruction}`,
         throw new Error('模型返回的题目列表为空或格式无法解析');
       }
 
-      const questions: QuestionItemModel[] = parsed.questions.map((q: any, i: number) => ({
-        id: `q${startIndex + i}`,
-        type: q.type || 'single_choice',
-        title: q.title || `${params.block.name} 题 ${i + 1}`,
-        options: Array.isArray(q.options) ? q.options : undefined,
-        placeholder: q.placeholder,
-        required: q.required !== false,
-        set: q.set && typeof q.set === 'object' ? q.set : undefined,
-        jump: q.jump,
-      }));
+      const questions: QuestionItemModel[] = parsed.questions.map((q: any, i: number) => {
+        const type = q.type || 'single_choice';
+        let options = Array.isArray(q.options) ? q.options : undefined;
+        let statements = Array.isArray(q.statements) ? q.statements : undefined;
+        if (type === 'likert_scale') {
+          if (!options || options.length === 0) options = ['非常不满意', '不满意', '一般', '满意', '非常满意'];
+          if (!statements || statements.length === 0) statements = ['整体评价'];
+        }
+        return {
+          id: `q${startIndex + i}`,
+          type,
+          title: q.title || `${params.block.name} 题 ${i + 1}`,
+          options: type === 'text_input' ? undefined : options,
+          statements: type === 'likert_scale' ? statements : undefined,
+          placeholder: q.placeholder,
+          required: q.required !== false,
+          set: q.set && typeof q.set === 'object' ? q.set : undefined,
+          jump: q.jump,
+        };
+      });
 
       return questions;
     } catch (err: any) {

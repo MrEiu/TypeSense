@@ -29,6 +29,22 @@ export interface DocumentDetail extends DocumentSummary {
   extractedText: string;
 }
 
+/**
+ * Decode filename to UTF-8 from Multer's default latin1 header encoding
+ */
+export function decodeFilename(rawName: string): string {
+  if (!rawName) return '';
+  try {
+    const decoded = Buffer.from(rawName, 'latin1').toString('utf8');
+    if (decoded && !decoded.includes('\ufffd')) {
+      return decoded;
+    }
+  } catch {
+    // fallback
+  }
+  return rawName;
+}
+
 export class DocumentService {
   /**
    * 处理上传的物理文件，抽取纯文本并入库
@@ -40,7 +56,8 @@ export class DocumentService {
     buffer: Buffer;
   }): Promise<DocumentDetail> {
     const docId = generateDocumentId();
-    const safeBaseName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const cleanOriginalName = decodeFilename(file.originalname);
+    const safeBaseName = path.basename(cleanOriginalName).replace(/[^a-zA-Z0-9._\u4e00-\u9fa5-]/g, '_');
     const physicalFileName = `${docId}_${safeBaseName}`;
     const targetFilePath = path.join(UPLOADS_DIR, physicalFileName);
 
@@ -48,7 +65,7 @@ export class DocumentService {
     fs.writeFileSync(targetFilePath, file.buffer);
 
     // 2. 智能抽取正文文本
-    const extractedText = await this.extractTextFromBuffer(file.buffer, file.mimetype, file.originalname);
+    const extractedText = await this.extractTextFromBuffer(file.buffer, file.mimetype, cleanOriginalName);
     const charCount = extractedText.length;
 
     // 3. 生成文本预览摘要 (前 160 个有效字符)
@@ -67,7 +84,7 @@ export class DocumentService {
     stmt.run(
       docId,
       physicalFileName,
-      file.originalname,
+      cleanOriginalName,
       file.mimetype || 'application/octet-stream',
       file.size,
       extractedText,
@@ -79,7 +96,7 @@ export class DocumentService {
     return {
       id: docId,
       filename: physicalFileName,
-      originalName: file.originalname,
+      originalName: cleanOriginalName,
       mimeType: file.mimetype,
       sizeBytes: file.size,
       charCount,
@@ -111,7 +128,7 @@ export class DocumentService {
     return rows.map((r) => ({
       id: r.id,
       filename: r.filename,
-      originalName: r.original_name,
+      originalName: decodeFilename(r.original_name),
       mimeType: r.mime_type,
       sizeBytes: Number(r.size_bytes) || 0,
       charCount: Number(r.char_count) || 0,
@@ -146,7 +163,7 @@ export class DocumentService {
     return {
       id: row.id,
       filename: row.filename,
-      originalName: row.original_name,
+      originalName: decodeFilename(row.original_name),
       mimeType: row.mime_type,
       sizeBytes: Number(row.size_bytes) || 0,
       charCount: Number(row.char_count) || 0,

@@ -23,6 +23,7 @@ import { ConcurrentPipelineService } from './concurrent-pipeline-service';
 import { ConfigService } from './config-service';
 import { TemplateService } from './template-service';
 import { AuthService, DEFAULT_ADMINS } from './auth-service';
+import { aiEditorRouter } from './questionnaire-ai-editor/routes';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,6 +38,9 @@ app.use(express.json({ limit: '10mb' }));
 // 初始化种子问卷与默认管理员账号
 SurveyService.initSeedSurveys();
 AuthService.initAdminAccounts();
+
+// 挂载 AI 问卷局部编辑接口
+app.use('/api/ai-editor', aiEditorRouter);
 
 // ==================== 问卷管理接口 ====================
 
@@ -548,7 +552,23 @@ app.post('/api/ai/generate-direct', async (req: Request, res: Response) => {
       enableJumpLogic: enableJumpLogic !== false,
     });
 
-    res.json({ success: true, survey });
+    // 自动保存进正式问卷库
+    const saved = SurveyService.createSurvey({
+      title: survey.title,
+      description: survey.description,
+      schema: survey as any,
+    });
+
+    res.json({
+      success: true,
+      survey,
+      saved: {
+        id: saved.id,
+        slug: saved.slug,
+        accessUrl: `/survey.html?id=${saved.id}`,
+        canvasUrl: `/admin.html?id=${saved.id}`,
+      },
+    });
   } catch (err: any) {
     console.error('[API] generate-direct 异常:', err);
     res.status(500).json({ success: false, error: err?.message || '生成问卷失败' });

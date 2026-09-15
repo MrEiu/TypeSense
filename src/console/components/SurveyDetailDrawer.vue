@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Download,
   QrCode as QrCodeIcon,
+  Sparkles,
 } from 'lucide-vue-next';
 import QRCode from 'qrcode';
 import {
@@ -37,6 +38,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:show', val: boolean): void;
+  (e: 'open-ai-edit', survey: SurveyMetadataItem): void;
   (e: 'status-changed', payload: { id: string; status: 'published' | 'paused' }): void;
 }>();
 
@@ -371,6 +373,16 @@ async function handleStatusChange(value: boolean) {
       <template #footer>
         <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; width: 100%;">
           <NButton @click="emit('update:show', false)">关闭</NButton>
+          <NButton
+            secondary
+            type="primary"
+            @click="emit('open-ai-edit', props.survey!)"
+          >
+            <template #icon>
+              <Sparkles style="width: 14px; height: 14px;" />
+            </template>
+            AI 局部编辑
+          </NButton>
           <NButton
             tag="a"
             :href="`/survey.html?id=${encodeURIComponent(survey?.slug || survey?.id || '')}`"
