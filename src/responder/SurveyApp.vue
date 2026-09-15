@@ -7,9 +7,9 @@ import {
   NSpin,
   type GlobalThemeOverrides,
 } from 'naive-ui';
-import { ChevronLeft, ChevronRight, CornerDownLeft, History, ArrowRight, Check } from 'lucide-vue-next';
+import { ChevronLeft, ChevronRight, CornerDownLeft, History, ArrowRight, Check, Sparkles } from 'lucide-vue-next';
 
-import type { QuestionnaireModel, QuestionItemModel } from '../schema/questionnaire-schema-types';
+import type { QuestionnaireModel, QuestionItemModel, QuestionAnswerMap } from '../schema/questionnaire-schema-types';
 import { QuestionnaireRepositoryService } from '../services/questionnaire-repository-service';
 import { QuestionnaireFlowEngine, type FlowStepState } from '../engine/flow-engine';
 import { DraftStorageService, type SurveyDraftData } from '../services/draft-storage-service';
@@ -20,6 +20,7 @@ import QuestionStage from './components/QuestionStage.vue';
 import CompletionCard from './components/CompletionCard.vue';
 import DisqualifiedCard from './components/DisqualifiedCard.vue';
 import AuthModal from '../components/auth/AuthModal.vue';
+import AiSurveyChatFillerModal from './components/AiSurveyChatFillerModal.vue';
 
 // Naive UI Zen Paper 极简书卷主题定制
 const themeOverrides: GlobalThemeOverrides = {
@@ -41,6 +42,7 @@ const themeOverrides: GlobalThemeOverrides = {
 // 状态定义
 const currentUser = ref<UserProfile | null>(AuthClientService.getUser());
 const showAuthModal = ref(false);
+const showAiChatFiller = ref(false);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const survey = ref<QuestionnaireModel | null>(null);
@@ -227,6 +229,17 @@ function onAuthSuccess(user: UserProfile) {
 function handleUserLogout() {
   AuthClientService.logout();
   currentUser.value = null;
+}
+
+// 接收并合并 AI 对话填写的答案
+function handleSyncAiAnswers(updatedAnswers: QuestionAnswerMap, newCount: number) {
+  answersMap.value = { ...answersMap.value, ...updatedAnswers };
+  saveCurrentDraft();
+
+  // 若当前停留的题目已有新提取的答案，实时联动更新当前答案
+  if (currentQuestion.value && answersMap.value[currentQuestion.value.id] !== undefined) {
+    currentAnswer.value = answersMap.value[currentQuestion.value.id];
+  }
 }
 
 // 检查当前题目必填校验
@@ -433,6 +446,18 @@ onUnmounted(() => {
           </div>
 
           <div class="nav-user-area">
+            <!-- AI 对话速填入口 -->
+            <button
+              v-if="survey && stage !== 'completed' && stage !== 'disqualified'"
+              type="button"
+              class="nav-ai-btn"
+              title="通过与 AI 自然交流提炼问卷答案"
+              @click="showAiChatFiller = true"
+            >
+              <Sparkles class="nav-ai-icon" />
+              <span>AI 对话速填</span>
+            </button>
+
             <template v-if="currentUser">
               <div class="user-badge">
                 <span class="user-indicator"></span>
@@ -581,6 +606,15 @@ onUnmounted(() => {
           :closable="true"
           @success="onAuthSuccess"
         />
+
+        <!-- AI 自然对话辅助速填弹窗 -->
+        <AiSurveyChatFillerModal
+          v-if="survey"
+          v-model:show="showAiChatFiller"
+          :survey="survey"
+          :initial-answers="(answersMap as QuestionAnswerMap)"
+          @sync-answers="handleSyncAiAnswers"
+        />
       </div>
     </NMessageProvider>
   </NConfigProvider>
@@ -639,6 +673,35 @@ onUnmounted(() => {
 .nav-user-area {
   display: flex;
   align-items: center;
+}
+
+.nav-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(124, 58, 237, 0.12));
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  color: #6366f1;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  cursor: pointer;
+  margin-right: 12px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.nav-ai-btn:hover {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(124, 58, 237, 0.22));
+  color: #4f46e5;
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.2);
+}
+
+.nav-ai-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .user-badge {

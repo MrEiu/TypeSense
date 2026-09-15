@@ -24,6 +24,8 @@ import { ConfigService } from './config-service';
 import { TemplateService } from './template-service';
 import { AuthService, DEFAULT_ADMINS } from './auth-service';
 import { aiEditorRouter } from './questionnaire-ai-editor/routes';
+import { AiChatFillerService } from './ai-chat-filler-service';
+import type { QuestionnaireModel } from '../src/schema/questionnaire-schema-types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -220,6 +222,34 @@ app.post('/api/surveys/:id/responses', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[API] saveResponse 异常:', err);
     res.status(500).json({ error: '答卷入库失败' });
+  }
+});
+
+/**
+ * AI 自然对话辅助填写问卷
+ */
+app.post('/api/surveys/:id/ai-chat-fill', async (req: Request, res: Response) => {
+  try {
+    const surveyId = req.params.id;
+    const surveyRaw = SurveyService.getSurvey(surveyId);
+    if (!surveyRaw) {
+      res.status(404).json({ success: false, error: '问卷不存在或已下架' });
+      return;
+    }
+
+    const survey = surveyRaw as unknown as QuestionnaireModel;
+    const { currentAnswers = {}, messages = [] } = req.body || {};
+
+    const result = await AiChatFillerService.chatAndExtract({
+      survey,
+      currentAnswers,
+      messages,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('[API] ai-chat-fill 异常:', err);
+    res.status(500).json({ success: false, error: err.message || 'AI 对话服务处理异常' });
   }
 });
 
