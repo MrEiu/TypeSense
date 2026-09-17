@@ -6,7 +6,7 @@
  */
 
 import type OpenAI from 'openai';
-import { LlmLogger } from '../../../llm-logger';
+import { LlmLogger } from '../../../../llm-logger';
 import type { FillerExecutionContext, StrategyDecisionResult } from '../../core/types';
 import { BatchContextBuilder } from './context';
 import { BatchAnswerMapper } from './mapper';

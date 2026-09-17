@@ -6,7 +6,7 @@
  * and maintains causal chain state.
  */
 
-import type { QuestionItemModel, QuestionAnswerMap } from '../../../../src/schema/questionnaire-schema-types';
+import type { QuestionItemModel, QuestionAnswerMap } from '../../../../../src/schema/questionnaire-schema-types';
 
 export interface DeepFollowUpState {
   currentTopic: string;

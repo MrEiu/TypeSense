@@ -5,7 +5,7 @@
  * Profiles user communication style and question distribution to route to optimal sub-strategy.
  */
 
-import type { QuestionItemModel, QuestionAnswerMap } from '../../../../src/schema/questionnaire-schema-types';
+import type { QuestionItemModel, QuestionAnswerMap } from '../../../../../src/schema/questionnaire-schema-types';
 import type { StrategyType } from '../../core/types';
 
 export interface AdaptiveProfile {

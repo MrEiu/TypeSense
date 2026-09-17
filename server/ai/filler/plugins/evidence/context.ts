@@ -8,8 +8,8 @@
 import type {
   QuestionItemModel,
   QuestionAnswerMap,
-} from '../../../../src/schema/questionnaire-schema-types';
-import { normalizeOptions } from '../../../../src/schema/normalizer';
+} from '../../../../../src/schema/questionnaire-schema-types';
+import { normalizeOptions } from '../../../../../src/schema/normalizer';
 
 export interface EvidenceItem {
   index: number;

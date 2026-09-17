@@ -8,11 +8,11 @@
 import type {
   QuestionItemModel,
   QuestionAnswerMap,
-} from '../../../../src/schema/questionnaire-schema-types';
+} from '../../../../../src/schema/questionnaire-schema-types';
 import {
   normalizeOptions,
   normalizeStatements,
-} from '../../../../src/schema/normalizer';
+} from '../../../../../src/schema/normalizer';
 
 export interface NaturalCandidateQuestion {
   id: string;
