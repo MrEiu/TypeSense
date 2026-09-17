@@ -493,3 +493,5 @@ export function useSurveyFlow() {
     handleRestart,
   };
 }
+
+export type SurveyFlowContext = ReturnType<typeof useSurveyFlow>;
