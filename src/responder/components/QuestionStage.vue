@@ -304,36 +304,39 @@ watch(
   flex: 1;
 }
 
-/* 李克特打分 / 矩阵量表 */
+/* 李克特打分 / 矩阵量表 (Compact & Ergonomic) */
 :deep(.likert-container) {
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
 }
 
 :deep(.scale-row) {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  gap: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  justify-content: space-between;
 }
 
 :deep(.scale-btn) {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 16px 12px;
+  gap: 3px;
+  padding: 10px 6px;
   background: #ffffff;
   border: 1.5px solid rgba(15, 23, 42, 0.09);
-  border-radius: 12px;
+  border-radius: 9px;
   cursor: pointer;
   transition: all 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :deep(.scale-btn:hover) {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   border-color: rgba(79, 70, 229, 0.35);
-  box-shadow: 0 8px 18px -4px rgba(79, 70, 229, 0.08);
+  box-shadow: 0 4px 12px -2px rgba(79, 70, 229, 0.08);
 }
 
 :deep(.scale-btn:active) {
@@ -347,7 +350,7 @@ watch(
 }
 
 :deep(.scale-num) {
-  font-size: 1.15rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #0f172a;
 }
@@ -357,26 +360,26 @@ watch(
 }
 
 :deep(.scale-text) {
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   color: #64748b;
   text-align: center;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
-/* 矩阵李克特量表样式 (Matrix) */
+/* 矩阵李克特量表样式 (Matrix) - 紧凑现代排版 */
 :deep(.likert-matrix-wrap) {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
 }
 
 :deep(.likert-matrix-header-desktop) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px 6px;
+  padding: 0 12px 4px;
   color: #64748b;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
@@ -386,11 +389,11 @@ watch(
 
 :deep(.header-scale-cols) {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 :deep(.header-scale-item) {
-  width: 60px;
+  width: 50px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -399,11 +402,12 @@ watch(
 
 :deep(.header-scale-num) {
   font-weight: 700;
+  font-size: 0.84rem;
   color: #0f172a;
 }
 
 :deep(.header-scale-label) {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: #94a3b8;
   white-space: nowrap;
 }
@@ -411,25 +415,25 @@ watch(
 :deep(.likert-matrix-rows) {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
 }
 
 :deep(.likert-matrix-row) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 14px 18px;
+  gap: 12px;
+  padding: 9px 12px;
   background: #f8fafc;
-  border: 1.5px solid rgba(15, 23, 42, 0.07);
-  border-radius: 14px;
-  transition: all 0.18s ease;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  transition: all 0.15s ease;
 }
 
 :deep(.likert-matrix-row:hover) {
   background: #ffffff;
   border-color: rgba(16, 185, 129, 0.3);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.05);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.05);
 }
 
 :deep(.likert-matrix-row.is-answered) {
@@ -440,35 +444,36 @@ watch(
 :deep(.matrix-row-statement) {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex: 1;
+  min-width: 0;
 }
 
 :deep(.stmt-index-tag) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   background: #ecfdf5;
   color: #059669;
-  border-radius: 6px;
-  font-size: 0.78rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
   font-weight: 700;
   flex-shrink: 0;
 }
 
 :deep(.stmt-title-text) {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: #1e293b;
-  line-height: 1.4;
+  line-height: 1.35;
 }
 
 :deep(.matrix-row-scales) {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 :deep(.matrix-scale-btn) {
@@ -476,32 +481,32 @@ watch(
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  min-width: 58px;
-  padding: 8px 6px;
+  gap: 1px;
+  min-width: 48px;
+  padding: 5px 6px;
   background: #ffffff;
-  border: 1.5px solid rgba(15, 23, 42, 0.1);
-  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :deep(.matrix-scale-btn .scale-num) {
-  font-size: 0.95rem;
+  font-size: 0.86rem;
   font-weight: 700;
   color: #334155;
 }
 
 :deep(.matrix-scale-btn .scale-label) {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   color: #64748b;
   white-space: nowrap;
 }
 
 :deep(.matrix-scale-btn:hover:not(:disabled)) {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
   border-color: #10b981;
-  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.15);
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.12);
 }
 
 :deep(.matrix-scale-btn.is-selected) {
@@ -526,14 +531,25 @@ watch(
   :deep(.likert-matrix-row) {
     flex-direction: column;
     align-items: stretch;
-    gap: 12px;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 9px;
   }
   :deep(.matrix-row-scales) {
+    gap: 4px;
     justify-content: space-between;
   }
   :deep(.matrix-scale-btn) {
     flex: 1;
     min-width: 0;
+    padding: 5px 2px;
+    border-radius: 6px;
+  }
+  :deep(.matrix-scale-btn .scale-num) {
+    font-size: 0.8rem;
+  }
+  :deep(.matrix-scale-btn .scale-label) {
+    font-size: 0.58rem;
   }
 }
 

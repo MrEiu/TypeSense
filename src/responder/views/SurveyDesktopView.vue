@@ -102,7 +102,7 @@ defineProps<{
       <!-- Stage 2: Question interaction stage -->
       <div v-else-if="flow.stage === 'question' && flow.currentQuestion" class="stage-stage-wrap">
         <QuestionStage
-          ref="flow.questionStageRef"
+          :ref="(el: any) => { (flow as any).questionStageRef = el }"
           :question="flow.currentQuestion"
           :seq-number="flow.currentSeqNumber"
           :total-questions="flow.totalQuestions"

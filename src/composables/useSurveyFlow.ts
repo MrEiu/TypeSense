@@ -6,7 +6,7 @@
  * and keyboard shortcuts.
  */
 
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, type UnwrapNestedRefs } from 'vue';
 import type {
   QuestionnaireModel,
   QuestionItemModel,
@@ -494,4 +494,4 @@ export function useSurveyFlow() {
   };
 }
 
-export type SurveyFlowContext = ReturnType<typeof useSurveyFlow>;
+export type SurveyFlowContext = UnwrapNestedRefs<ReturnType<typeof useSurveyFlow>>;

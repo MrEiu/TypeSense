@@ -7,6 +7,7 @@
  * while managing singleton flow engine state and global modals.
  */
 
+import { reactive } from 'vue';
 import {
   NConfigProvider,
   NMessageProvider,
@@ -39,9 +40,9 @@ const themeOverrides: GlobalThemeOverrides = {
   },
 };
 
-// Device detection and flow engine state
+// Device detection and reactive flow engine state
 const { isMobile } = useDevice();
-const flow = useSurveyFlow();
+const flow = reactive(useSurveyFlow());
 </script>
 
 <template>
